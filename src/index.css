@@ -1,0 +1,56 @@
+@import "tailwindcss";
+
+@keyframes spinSmooth {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes spinReverse {
+  from {
+    transform: rotate(360deg);
+  }
+  to {
+    transform: rotate(0deg);
+  }
+}
+
+@keyframes laserSweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(200%);
+  }
+}
+
+@keyframes textGlow {
+  0%, 100% {
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.4), 0 0 25px rgba(239, 68, 68, 0.3);
+  }
+  50% {
+    text-shadow: 0 0 20px rgba(255, 255, 255, 0.8), 0 0 40px rgba(239, 68, 68, 0.7);
+  }
+}
+
+.anim-spin-smooth {
+  animation: spinSmooth 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  will-change: transform;
+}
+
+.anim-spin-reverse {
+  animation: spinReverse 3.8s linear infinite;
+  will-change: transform;
+}
+
+.anim-laser-sweep {
+  animation: laserSweep 1.8s ease-in-out infinite;
+  will-change: transform;
+}
+
+.anim-text-glow {
+  animation: textGlow 2.5s ease-in-out infinite;
+}
