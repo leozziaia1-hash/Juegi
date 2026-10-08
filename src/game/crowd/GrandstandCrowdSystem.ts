@@ -11,6 +11,7 @@
  */
 
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { safeMergeBufferGeometries } from '../utils/GeometryUtils';
 
 export interface CrowdPlacementConfig {
@@ -59,10 +60,90 @@ export class GrandstandCrowdSystem {
     0xffdbac, // Light Peach
   ];
 
+  private blenderSpectatorGeo: THREE.BufferGeometry | null = null;
+
   constructor() {
     this.group = new THREE.Group();
     this.group.name = 'GrandstandCrowdSystem';
     this.initMaterials();
+    this.loadBlenderSpectatorModel();
+  }
+
+  /**
+   * Asynchronously loads the Blender-sculpted photorealistic 3D human spectator asset.
+   * Seamlessly hot-swaps all GPU instanced meshes with the anatomical high-definition model.
+   */
+  private loadBlenderSpectatorModel(): void {
+    const loader = new GLTFLoader();
+    loader.load(
+      '/models/photorealistic_spectator.glb',
+      (gltf) => {
+        const partsGeos: THREE.BufferGeometry[] = [];
+        const tagBodyPart = (geo: THREE.BufferGeometry, partCode: number): THREE.BufferGeometry => {
+          const nonIndexed = geo.toNonIndexed();
+          const count = nonIndexed.attributes.position.count;
+          const partAttr = new Float32Array(count);
+          partAttr.fill(partCode);
+          nonIndexed.setAttribute('aBodyPart', new THREE.BufferAttribute(partAttr, 1));
+          return nonIndexed;
+        };
+
+        const partCodes: Record<string, number> = {
+          Legs: 0.0,
+          Torso: 1.0,
+          Head: 2.0,
+          Cap: 3.0,
+          ArmL: 4.0,
+          ArmR: 5.0,
+        };
+
+        gltf.scene.traverse((c) => {
+          if ((c as THREE.Mesh).isMesh) {
+            const mesh = c as THREE.Mesh;
+            for (const [key, code] of Object.entries(partCodes)) {
+              if (mesh.name.includes(key)) {
+                partsGeos.push(tagBodyPart(mesh.geometry.clone(), code));
+                break;
+              }
+            }
+          }
+        });
+
+        if (partsGeos.length > 0) {
+          const merged = safeMergeBufferGeometries(partsGeos, false);
+          if (merged) {
+            merged.computeVertexNormals();
+            this.blenderSpectatorGeo = merged;
+            // Upgrade all existing GPU instanced crowd meshes
+            for (const cm of this.crowdMeshes) {
+              const oldGeo = cm.geometry;
+              const newGeo = merged.clone();
+              const instancedAttrNames = [
+                'aPhase',
+                'aAnimType',
+                'aSpeed',
+                'aTorsoColor',
+                'aCapColor',
+                'aSkinColor',
+                'aCheerSens',
+              ];
+              for (const attrName of instancedAttrNames) {
+                const attr = oldGeo.getAttribute(attrName);
+                if (attr) {
+                  newGeo.setAttribute(attrName, attr);
+                }
+              }
+              cm.geometry = newGeo;
+              oldGeo.dispose();
+            }
+          }
+        }
+      },
+      undefined,
+      () => {
+        // Fallback procedural geometry remains active
+      }
+    );
   }
 
   private initMaterials(): void {
@@ -96,10 +177,12 @@ export class GrandstandCrowdSystem {
         varying vec3 vWorldPos;
         varying vec3 vColor;
         varying float vDiffuse;
+        varying float vBodyPart;
 
         void main() {
           vec3 transformed = position;
           vec3 transformedNormal = normal;
+          vBodyPart = aBodyPart;
 
           // Compute world position of instance
           vec4 worldInstancePos = instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
@@ -206,12 +289,27 @@ export class GrandstandCrowdSystem {
         varying vec3 vWorldPos;
         varying vec3 vColor;
         varying float vDiffuse;
+        varying float vBodyPart;
 
         void main() {
           vec3 finalColor = vColor * vDiffuse;
+          vec3 viewDir = normalize(cameraPosition - vWorldPos);
+
+          // PBR enhancements per anatomical body part
+          if (abs(vBodyPart - 2.0) < 0.2 || vBodyPart >= 3.8) {
+            // Warm human skin subsurface scattering approximation
+            finalColor += vec3(0.045, 0.018, 0.010) * vDiffuse;
+          } else if (abs(vBodyPart - 3.0) < 0.2) {
+            // Polarized sport sunglasses & cap visor specular sheen
+            vec3 halfVec = normalize(viewDir + vec3(0.5, 0.8, 0.3));
+            float spec = pow(max(dot(vNormal, halfVec), 0.0), 24.0);
+            finalColor += vec3(0.40, 0.45, 0.55) * spec * 0.45;
+          } else if (abs(vBodyPart) < 0.2) {
+            // Textured dark indigo denim pants
+            finalColor = mix(finalColor, vec3(0.12, 0.14, 0.22) * vDiffuse, 0.65);
+          }
           
           // Subtle stadium rim-light for depth definition
-          vec3 viewDir = normalize(cameraPosition - vWorldPos);
           float rim = 1.0 - max(dot(viewDir, vNormal), 0.0);
           rim = smoothstep(0.68, 0.98, rim) * 0.20;
           finalColor += vec3(0.95, 0.98, 1.0) * rim;
@@ -302,6 +400,10 @@ export class GrandstandCrowdSystem {
    * Total seated height: ~1.12m. Standing height: ~1.72m.
    */
   private buildSpectatorBaseGeometry(): THREE.BufferGeometry {
+    if (this.blenderSpectatorGeo) {
+      return this.blenderSpectatorGeo.clone();
+    }
+
     const partsGeos: THREE.BufferGeometry[] = [];
 
     const tagBodyPart = (geo: THREE.BufferGeometry, partCode: number): THREE.BufferGeometry => {
@@ -313,58 +415,93 @@ export class GrandstandCrowdSystem {
       return nonIndexed;
     };
 
-    // 1. Lower Body / Legs (Seated posture)
-    // Seated Thighs (Part 0)
-    const thighsGeo = new THREE.BoxGeometry(0.32, 0.13, 0.36);
-    thighsGeo.translate(0, 0.42, 0.14);
-    partsGeos.push(tagBodyPart(thighsGeo, 0.0));
+    // 1. Lower Body / Legs (Anatomically proportioned seated legs)
+    // Left & Right Thighs (Part 0)
+    [-0.11, 0.11].forEach((lx) => {
+      const thigh = new THREE.CylinderGeometry(0.082, 0.074, 0.36, 7);
+      thigh.rotateX(Math.PI / 2);
+      thigh.translate(lx, 0.42, 0.18);
+      partsGeos.push(tagBodyPart(thigh, 0.0));
 
-    // Calves / Lower Legs (Part 0)
-    const calvesGeo = new THREE.BoxGeometry(0.30, 0.36, 0.13);
-    calvesGeo.translate(0, 0.18, 0.28);
-    partsGeos.push(tagBodyPart(calvesGeo, 0.0));
+      const calf = new THREE.CylinderGeometry(0.072, 0.060, 0.34, 7);
+      calf.translate(lx, 0.20, 0.36);
+      partsGeos.push(tagBodyPart(calf, 0.0));
 
-    // 2. Torso (Part 1)
-    const torsoGeo = new THREE.CylinderGeometry(0.17, 0.15, 0.42, 8);
-    torsoGeo.translate(0, 0.68, 0.0);
+      // Sneaker with rubber sole
+      const shoe = new THREE.BoxGeometry(0.086, 0.07, 0.19);
+      shoe.translate(lx, 0.05, 0.43);
+      partsGeos.push(tagBodyPart(shoe, 0.0));
+    });
+
+    // 2. Torso (Part 1 - Team polo shirt with athletic chest taper)
+    const torsoGeo = new THREE.CylinderGeometry(0.18, 0.14, 0.44, 8);
+    torsoGeo.translate(0, 0.67, 0.0);
     partsGeos.push(tagBodyPart(torsoGeo, 1.0));
 
-    // 3. Head & Face (Part 2)
-    const headGeo = new THREE.SphereGeometry(0.105, 8, 6);
-    headGeo.translate(0, 0.98, 0.0);
+    // Polo collar & shoulder caps
+    const collarGeo = new THREE.CylinderGeometry(0.12, 0.16, 0.08, 8);
+    collarGeo.translate(0, 0.88, 0.02);
+    partsGeos.push(tagBodyPart(collarGeo, 1.0));
+
+    // 3. Head & Face (Part 2 - Anatomical head with neck and facial features)
+    const neckGeo = new THREE.CylinderGeometry(0.062, 0.068, 0.10, 7);
+    neckGeo.translate(0, 0.90, 0.0);
+    partsGeos.push(tagBodyPart(neckGeo, 2.0));
+
+    const headGeo = new THREE.SphereGeometry(0.115, 8, 7);
+    headGeo.scale(1.0, 1.25, 1.1);
+    headGeo.translate(0, 1.01, 0.01);
     partsGeos.push(tagBodyPart(headGeo, 2.0));
 
-    // 4. Baseball Cap (Part 3)
-    const capCrown = new THREE.SphereGeometry(0.11, 8, 5, 0, Math.PI * 2, 0, Math.PI / 2);
-    capCrown.translate(0, 0.99, 0.0);
+    // Nose & brow ridge
+    const noseGeo = new THREE.ConeGeometry(0.025, 0.05, 4);
+    noseGeo.rotateX(Math.PI / 2);
+    noseGeo.translate(0, 1.01, 0.13);
+    partsGeos.push(tagBodyPart(noseGeo, 2.0));
+
+    // 4. Baseball Cap & Sunglasses (Part 3)
+    const capCrown = new THREE.SphereGeometry(0.122, 8, 6, 0, Math.PI * 2, 0, Math.PI / 2);
+    capCrown.translate(0, 1.03, 0.0);
     partsGeos.push(tagBodyPart(capCrown, 3.0));
 
-    const capVisor = new THREE.BoxGeometry(0.13, 0.02, 0.09);
-    capVisor.rotateX(-0.12);
-    capVisor.translate(0, 1.01, 0.11);
+    const capVisor = new THREE.BoxGeometry(0.14, 0.022, 0.10);
+    capVisor.rotateX(-0.16);
+    capVisor.translate(0, 1.03, 0.14);
     partsGeos.push(tagBodyPart(capVisor, 3.0));
 
+    const sunglasses = new THREE.BoxGeometry(0.13, 0.032, 0.035);
+    sunglasses.translate(0, 1.025, 0.12);
+    partsGeos.push(tagBodyPart(sunglasses, 3.0));
+
     // 5. Left Arm (Part 4)
-    const leftArmUpper = new THREE.CylinderGeometry(0.042, 0.038, 0.22, 6);
+    const leftArmUpper = new THREE.CylinderGeometry(0.046, 0.040, 0.22, 6);
     leftArmUpper.rotateZ(0.32);
-    leftArmUpper.translate(-0.19, 0.70, 0.04);
+    leftArmUpper.translate(-0.19, 0.72, 0.04);
     partsGeos.push(tagBodyPart(leftArmUpper, 4.0));
 
-    const leftForearm = new THREE.CylinderGeometry(0.036, 0.032, 0.20, 6);
+    const leftForearm = new THREE.CylinderGeometry(0.040, 0.034, 0.20, 6);
     leftForearm.rotateX(-0.75);
     leftForearm.translate(-0.21, 0.62, 0.14);
     partsGeos.push(tagBodyPart(leftForearm, 4.0));
 
+    const leftHand = new THREE.BoxGeometry(0.045, 0.028, 0.07);
+    leftHand.translate(-0.21, 0.58, 0.24);
+    partsGeos.push(tagBodyPart(leftHand, 4.0));
+
     // 6. Right Arm (Part 5)
-    const rightArmUpper = new THREE.CylinderGeometry(0.042, 0.038, 0.22, 6);
+    const rightArmUpper = new THREE.CylinderGeometry(0.046, 0.040, 0.22, 6);
     rightArmUpper.rotateZ(-0.32);
-    rightArmUpper.translate(0.19, 0.70, 0.04);
+    rightArmUpper.translate(0.19, 0.72, 0.04);
     partsGeos.push(tagBodyPart(rightArmUpper, 5.0));
 
-    const rightForearm = new THREE.CylinderGeometry(0.036, 0.032, 0.20, 6);
+    const rightForearm = new THREE.CylinderGeometry(0.040, 0.034, 0.20, 6);
     rightForearm.rotateX(-0.75);
     rightForearm.translate(0.21, 0.62, 0.14);
     partsGeos.push(tagBodyPart(rightForearm, 5.0));
+
+    const rightHand = new THREE.BoxGeometry(0.045, 0.028, 0.07);
+    rightHand.translate(0.21, 0.58, 0.24);
+    partsGeos.push(tagBodyPart(rightHand, 5.0));
 
     const merged = safeMergeBufferGeometries(partsGeos, false) || new THREE.BufferGeometry();
     merged.computeVertexNormals();
@@ -615,48 +752,50 @@ export class GrandstandCrowdSystem {
    * Generates crowd placements for the North Bank Natural Viewing Berm (Curving towards Z = +130)
    */
   public static generateNorthBankCrowd(
-    width: number,
-    tiers: number,
-    tierRise: number,
-    baseZ: number,
-    density = 0.84
+    width: number = 88,
+    tiers: number = 6,
+    tierRise: number = 0.98,
+    baseZ: number = 152.0,
+    density = 0.88
   ): CrowdPlacementConfig[] {
     const list: CrowdPlacementConfig[] = [];
     const halfW = width / 2;
-    const seatPitch = 1.10;
+    const seatPitch = 0.84;
 
     for (let t = 0; t < tiers; t++) {
-      const tierWidth = width - t * 3.0;
+      const tierWidth = width - t * 2.0;
       const tierHalfW = tierWidth / 2;
-      const baseY = 1.8 + t * tierRise;
-      // Tiers step BACKWARDS away from track (positive Z: 152, 154.2, 156.4, etc.)
-      const centerZ = baseZ + t * 2.2;
-      const seatCount = Math.floor((tierWidth - 2.8) / seatPitch);
+      const baseY = 1.80 + t * tierRise;
+      // Tiers step back away from track into positive Z
+      const centerZ = baseZ + t * 2.15 + 0.65;
+      const seatCount = Math.floor((tierWidth - 2.4) / seatPitch);
 
       for (let s = 0; s <= seatCount; s++) {
-        const sx = -tierHalfW + 1.4 + s * seatPitch;
+        const sx = -tierHalfW + 1.2 + s * seatPitch;
 
-        if (Math.abs(sx) < 1.2 || Math.abs(sx - 24) < 1.2 || Math.abs(sx + 24) < 1.2) {
+        // Skip staircase access corridors (Aisles at center 0m, +/-24m)
+        if (Math.abs(sx) < 1.15 || Math.abs(sx - 24) < 1.15 || Math.abs(sx + 24) < 1.15) {
           continue;
         }
 
         if (Math.random() > density) continue;
 
-        // Parabolic curve towards track (+130)
-        const curveOffset = Math.pow(sx / halfW, 2) * 3.5;
-        const sz = centerZ - 0.25 + curveOffset;
+        // Parabolic curve matching Blender grandstand model
+        const curveOffset = Math.pow(sx / halfW, 2) * 3.2;
+        const sz = centerZ + curveOffset - 0.08;
 
         // Facing track southwards (yaw ≈ Math.PI)
         const dx = 0.05;
-        const dz = (Math.pow((sx + dx) / halfW, 2) - Math.pow(sx / halfW, 2)) * 3.5;
+        const dz = (Math.pow((sx + dx) / halfW, 2) - Math.pow(sx / halfW, 2)) * 3.2;
         const yawAngle = Math.PI + Math.atan2(dz, dx);
 
         list.push({
           x: sx,
-          y: baseY + 0.06,
+          y: baseY + 0.38,
           z: sz,
           yaw: yawAngle,
           isStanding: false,
+          hasFlag: Math.random() < 0.14,
         });
       }
     }

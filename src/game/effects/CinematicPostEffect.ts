@@ -2,9 +2,9 @@
  * CinematicPostEffect.ts - Studio Broadcast Optics & Camera Post-Processing
  *
  * Implements high-end Formula 1 broadcast camera optics:
- * 1. Optical Lens Vignetting: Smooth optical falloff towards corners simulating high-aperture lenses.
- * 2. CMOS Sensor Micro-Grain & Dither: Eliminates 8-bit digital color banding in sky and asphalt.
- * 3. Broadcast Contrast & Sunlight Flare Sheen.
+ * 1. Optical Lens Vignetting: Smooth optical falloff towards corners simulating high-aperture broadcast lenses.
+ * 2. CMOS Sensor Micro-Grain & Dither: Eliminates 8-bit digital color banding in sky and distant horizons.
+ * 3. Directional Solar Bleed & Optical Flare Sheen: Calibrated daylight transmission across upper camera quadrant.
  *
  * Performance:
  * - 0ms CPU overhead
@@ -44,28 +44,29 @@ export class CinematicPostEffect {
 
       void main() {
         vec2 uv = vUv;
-        vec2 centered = (uv - 0.5) * vec2(1.0, 0.85);
-        float dist = dot(centered, centered);
+        // Broadcast anamorphic oval framing (16:9 widescreen natural falloff)
+        vec2 centered = (uv - 0.5) * vec2(1.0, 0.72);
+        float distSq = dot(centered, centered);
 
-        // 1. Natural Optical Lens Vignette with squared distance calculation (zero sqrt)
-        float vignette = smoothstep(0.518, 0.078, dist);
+        // 1. Natural Broadcast Lens Vignette with smooth quadratic curve
+        float vignette = smoothstep(0.55, 0.10, distSq);
         float vignetteFactor = (1.0 - vignette) * uVignetteIntensity;
 
-        // 2. High-speed triangular blue-noise dither (zero PRNG trigonometric hash overhead)
+        // 2. High-speed temporal blue-noise micro-dither (kills 8-bit banding without visible noise)
         vec2 ditherCoord = gl_FragCoord.xy + vec2(fract(uTime * 17.13) * 64.0);
         float dither = fract(sin(dot(ditherCoord, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;
         float noise = dither * uGrainIntensity;
 
-        // 3. Very subtle lens top tint (Warm solar bleed in upper atmosphere)
-        float topBleed = smoothstep(0.3, 0.95, uv.y) * uWarmth * 0.04;
+        // 3. Subtle solar atmospheric bleed in upper sky
+        float topBleed = smoothstep(0.35, 0.98, uv.y) * uWarmth * 0.028;
 
-        float alpha = clamp(vignetteFactor + noise - topBleed * 0.5, 0.0, 0.42);
+        float alpha = clamp(vignetteFactor + noise - topBleed * 0.4, 0.0, 0.35);
         if (alpha <= 0.002) {
           discard;
         }
 
-        // Combined optical vignette & sensor grading
-        vec3 tint = mix(vec3(0.01, 0.015, 0.03), vec3(0.06, 0.04, 0.02), topBleed);
+        // Deep cinema optical tint
+        vec3 tint = mix(vec3(0.008, 0.010, 0.018), vec3(0.045, 0.035, 0.020), topBleed);
         gl_FragColor = vec4(tint, alpha);
       }
     `;
@@ -75,8 +76,8 @@ export class CinematicPostEffect {
       fragmentShader,
       uniforms: {
         uTime: { value: 0.0 },
-        uVignetteIntensity: { value: 0.38 },
-        uGrainIntensity: { value: 0.024 },
+        uVignetteIntensity: { value: 0.28 },
+        uGrainIntensity: { value: 0.016 },
         uWarmth: { value: 0.5 },
       },
       transparent: true,

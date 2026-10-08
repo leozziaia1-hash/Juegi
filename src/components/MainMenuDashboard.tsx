@@ -249,7 +249,7 @@ export const MainMenuDashboard: React.FC<MainMenuDashboardProps> = ({
             <div>
               <h2 className="text-base sm:text-lg font-black tracking-wider text-white">GRAN PREMIO</h2>
               <p className="text-xs text-neutral-300 font-normal leading-relaxed mt-0.5">
-                Parrilla completa de 5 coches con IA, estrategia de gomas y parada en boxes.
+                Duelo 1 vs 1 contra coche rival de IA, estrategia de gomas y parada en boxes.
               </p>
             </div>
           </button>

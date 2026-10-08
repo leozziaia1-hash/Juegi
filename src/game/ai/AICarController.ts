@@ -132,7 +132,7 @@ export class AICarController {
   private controlTimer: number = 0;
   private strategyTimer: number = 0;
   private cachedTargetSpeedMs: number = 60.0;
-  private static _obstaclesPool: VehicleObstacle[] = Array.from({ length: 32 }, () => ({
+  private static _obstaclesPool: VehicleObstacle[] = Array.from({ length: 4 }, () => ({
     id: '',
     x: 0,
     z: 0,
@@ -608,26 +608,14 @@ export class AICarController {
         playerRelLateral = (pDx * normX + pDz * normZ);
       }
 
+      // In 1v1 duel, check if AI is ahead of the player or leading
       let amLeading = true;
-      for (let o = 0; o < otherAiCars.length; o++) {
-        const other = otherAiCars[o];
-        if (other === this) continue;
-        if (other.distanceAlongTrack > this.distanceAlongTrack && other.currentLap >= this.currentLap) {
+      if (playerDistSq <= 3025) {
+        const fwdX = Math.sin(this.physics.yaw);
+        const fwdZ = Math.cos(this.physics.yaw);
+        const dotFwd = pDx * fwdX + pDz * fwdZ;
+        if (dotFwd > 0.5) {
           amLeading = false;
-        }
-        
-        const oDx = other.physics.position.x - myX;
-        const oDz = other.physics.position.z - myZ;
-        if (oDx * oDx + oDz * oDz <= 3025 && poolIdx < AICarController._obstaclesPool.length) {
-          const slot = AICarController._obstaclesPool[poolIdx++];
-          slot.id = other.team.id;
-          slot.x = other.physics.position.x;
-          slot.z = other.physics.position.z;
-          slot.yaw = other.physics.yaw;
-          slot.speedMs = other.physics.speed;
-          slot.length = 4.8;
-          slot.width = 2.0;
-          activeObstacles.push(slot);
         }
       }
 

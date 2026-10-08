@@ -8,13 +8,16 @@
 
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { safeMergeBufferGeometries, safeMergeAndDispose } from '../utils/GeometryUtils';
 import asphaltImg from '../../assets/images/track_asphalt_detail_1790904767865.jpg';
 import { getAsphaltPBRTextures, getConcretePBRTextures } from '../utils/TrackPBRTextures';
 import { GrandstandCrowdSystem, CrowdPlacementConfig } from '../crowd/GrandstandCrowdSystem';
 import { CurvedPitBuildingBuilder } from './CurvedPitBuildingBuilder';
+import { ModernVIPBuildingBuilder } from './ModernVIPBuildingBuilder';
 import { OrganicVegetationSystem, TreePlacementConfig } from './OrganicVegetationSystem';
 import { OrganicTerrainBuilder } from './OrganicTerrainBuilder';
+import { DistantMountainBackdropBuilder } from './DistantMountainBackdropBuilder';
 
 export interface StaticObstacle {
   x: number;
@@ -108,9 +111,9 @@ export class TrackBuilder {
     this.buildTecproRunoffZones();
     this.buildMarshalSafetyPosts();
     this.buildGrandstands();
+    this.buildModernVIPArchitecture();
     this.buildPaddockBuildingAndPitLane();
     this.buildPitEntryAndExitArchitecture();
-    this.buildPaddockTransportersAndTrailers();
     this.buildServiceAndSafetyVehicles();
     this.buildSpeedTrapRadarAndSectorGantries();
     this.buildJumbotronAndTimingTowers();
@@ -129,8 +132,10 @@ export class TrackBuilder {
     const dynamicMeshes = new Set(this.dynamicProps.map(p => p.mesh));
     this.group.traverse((obj) => {
       if (obj instanceof THREE.Mesh) {
-        // Primary concrete barrier walls and large overhead trusses cast crisp physical shadows across track edges and kerbs
-        const isShadowCaster = obj.material === this.concreteBarrierMat ||
+        // Primary concrete barrier walls, overhead trusses and modern architectural building cast crisp physical shadows across track edges and kerbs
+        const isShadowCaster = obj.castShadow === true ||
+          obj.userData.castShadow === true ||
+          obj.material === this.concreteBarrierMat ||
           obj.material === this.overheadTrussMat;
         obj.castShadow = isShadowCaster;
 
@@ -923,6 +928,22 @@ export class TrackBuilder {
   }
 
   /**
+   * Spatial clearance predicate: checks if coordinates fall on the exterior verge,
+   * gravel runoff zone or outer forest amphitheater of Turn 1 (Curva 1).
+   * Center: (92, -92), track radius: 38m, outer edge: >= 46m.
+   */
+  public isTurn1Exterior(x: number, z: number): boolean {
+    if (x >= 75 && z <= -75) {
+      const dist = Math.hypot(x - 92, z - (-92));
+      // Outer track edge, gravel runoff, barrier line and outfield perimeter
+      if (dist >= 46.0) return true;
+      if (z <= -136.0 && x >= 75.0) return true;
+      if (x >= 136.0 && z <= -75.0) return true;
+    }
+    return false;
+  }
+
+  /**
    * High-performance 3D Grass Tufts rendered in 1 single draw call via InstancedMesh.
    * Features strict geometric clearance testing: ZERO grass penetrates grandstands,
    * concrete barrier walls, catch fencing, pit buildings, helipad or asphalt track.
@@ -963,19 +984,19 @@ export class TrackBuilder {
      * - Gravel runoff traps
      */
     const isGrassAllowed = (gx: number, gz: number): boolean => {
+      // 0. Curva 1 Exterior Exclusion Zone (strictly eliminates grass tufts & weed stalks outside Turn 1)
+      if (this.isTurn1Exterior(gx, gz)) return false;
+
       // 1. South Main Grandstand Exclusion Zone (including canopy & VIP box)
       if (gx >= -68 && gx <= 68 && gz >= -168 && gz <= -139.2) return false;
 
       // 2. North Grandstand Exclusion Zone
-      if (gx >= -48 && gx <= 48 && gz >= 139.2 && gz <= 164) return false;
+      if (gx >= -48 && gx <= 48 && gz >= 139.2 && gz <= 170.0) return false;
 
       // 3. Pit Lane, Pit Apron, Paddock Garages & Team Transporters (100% full width x: -96 to +96, z: -124 to -84)
       if (Math.abs(gx) <= 96 && gz >= -124.5 && gz <= -84.0) return false;
 
-      // 4. Helipad (radius 18m around 30, 30)
-      if ((gx - 30) ** 2 + (gz - 30) ** 2 < 18 * 18) return false;
-
-      // 5. Track Asphalt Surface & Starting Grid (Straight sections + 1.2m safety clearance margin)
+      // 4. Track Asphalt Surface & Starting Grid (Straight sections + 1.2m safety clearance margin)
       if (Math.abs(gx) <= 94 && gz >= -140.0 && gz <= -120.0) return false;
       if (Math.abs(gx) <= 94 && gz >= 120.0 && gz <= 140.0) return false;
       if (gx >= 120.0 && gx <= 140.0 && Math.abs(gz) <= 94) return false;
@@ -1052,6 +1073,8 @@ export class TrackBuilder {
     // Placed first to guarantee 100% full lush grass coverage across all 4 corner curves!
     // =========================================================================
     cornerCenters.forEach(({ cx, cz }) => {
+      // Exclude Turn 1 outer curve meadow (exterior of Turn 1)
+      if (cx === c && cz === -c) return;
       const signX = Math.sign(cx);
       const signZ = Math.sign(cz);
       for (let r = 63.6; r <= 96.0; r += 2.4) {
@@ -1203,6 +1226,16 @@ export class TrackBuilder {
     );
     terrainGroup.add(ground);
 
+    // 1.5. 360° Panoramic Distant Mountain Range Backdrop (Single draw call, zero CPU overhead)
+    const mountainBackdrop = DistantMountainBackdropBuilder.buildMountainRing({
+      innerRadius: 370,
+      outerRadius: 820,
+      radialSegments: 288,
+      heightSegments: 24,
+      baseHeightScale: 1.25,
+    });
+    terrainGroup.add(mountainBackdrop);
+
     // 2. Corner Gravel Runoff Traps (Batched into a single hardware BufferGeometry for 0.00ms draw call overhead)
     const cornerArcs = [
       { cx: this.innerCornerCenter, cz: -this.innerCornerCenter, startA: -Math.PI / 2, endA: 0 },
@@ -1236,33 +1269,8 @@ export class TrackBuilder {
       }
     }
 
-    // 3. Infield Asphalt Service Road & Helipad
-    const heliGeo = new THREE.CircleGeometry(16, 32);
-    heliGeo.rotateX(-Math.PI / 2);
-    const heliCanvas = document.createElement('canvas');
-    heliCanvas.width = 256;
-    heliCanvas.height = 256;
-    const hCtx = heliCanvas.getContext('2d')!;
-    hCtx.fillStyle = '#1e293b';
-    hCtx.fillRect(0, 0, 256, 256);
-    hCtx.lineWidth = 14;
-    hCtx.strokeStyle = '#facc15';
-    hCtx.beginPath();
-    hCtx.arc(128, 128, 105, 0, Math.PI * 2);
-    hCtx.stroke();
-    hCtx.fillStyle = '#facc15';
-    hCtx.font = 'bold 120px sans-serif';
-    hCtx.textAlign = 'center';
-    hCtx.textBaseline = 'middle';
-    hCtx.fillText('H', 128, 128);
-    const heliTex = new THREE.CanvasTexture(heliCanvas);
-    const heliMat = new THREE.MeshStandardMaterial({ map: heliTex, roughness: 0.8 });
-    const helipad = new THREE.Mesh(heliGeo, heliMat);
-    helipad.position.set(30, 0.012, 30);
-    helipad.receiveShadow = true;
-    terrainGroup.add(helipad);
-
-    // 4. Compacted Dirt/Soil Shoulder Transition Strips along Kerbs and Track Limits (Batched into 1 single Mesh)
+    // 3. Infield Asphalt Service Road & Landscaping (Helipad removed from interior island)
+    // Compacted Dirt/Soil Shoulder Transition Strips along Kerbs and Track Limits (Batched into 1 single Mesh)
     const c = this.innerCornerCenter; // 92
     const half = this.halfSize; // 130
     const w = this.trackWidth; // 16
@@ -1487,7 +1495,7 @@ export class TrackBuilder {
 
     // 1. South Straight (z = -half = -130, full 184m)
     for (let x = -c + 4; x <= c - 4; x += 8) {
-      if (Math.abs(x) < 2.0) continue; // Skip finish line checker to prevent z-fighting
+      if (Math.abs(x - (-10.0)) < 4.0 || Math.abs(x) < 2.0) continue; // Skip finish line checker at x = -10.0 to prevent z-fighting
       const g = baseDashHGeo.clone();
       g.translate(x, 0.010, -half);
       whiteGeos.push(g);
@@ -1801,24 +1809,34 @@ export class TrackBuilder {
       kerbGroup.add(whiteMesh);
     }
 
-    // Checkered Start / Finish Line
-    const sfGeo = new THREE.PlaneGeometry(16, 2.5);
+    // Checkered Start / Finish Line (Transverse across the entire track width, FIA standard)
+    const sfGeo = new THREE.PlaneGeometry(2.2, this.trackWidth);
     sfGeo.rotateX(-Math.PI / 2);
     const canvas = document.createElement('canvas');
     canvas.width = 128;
-    canvas.height = 32;
+    canvas.height = 1024;
     const ctx = canvas.getContext('2d')!;
+    // Base crisp white
     ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, 128, 32);
+    ctx.fillRect(0, 0, 128, 1024);
+    // Dark asphalt squares (2 columns along track x 16 squares across track)
     ctx.fillStyle = '#09090b';
-    for (let x = 0; x < 128; x += 16) {
-      for (let y = 0; y < 32; y += 16) {
-        if ((x / 16 + y / 16) % 2 === 0) {
-          ctx.fillRect(x, y, 16, 16);
+    const checkerSize = 64;
+    for (let x = 0; x < 128; x += checkerSize) {
+      for (let y = 0; y < 1024; y += checkerSize) {
+        if ((x / checkerSize + y / checkerSize) % 2 === 0) {
+          ctx.fillRect(x, y, checkerSize, checkerSize);
         }
       }
     }
+    // Solid white leading line across the front edge (FIA specification)
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(116, 0, 12, 1024);
+
     const sfTex = new THREE.CanvasTexture(canvas);
+    sfTex.wrapS = THREE.ClampToEdgeWrapping;
+    sfTex.wrapT = THREE.ClampToEdgeWrapping;
+    sfTex.anisotropy = 8;
     const sfMat = new THREE.MeshStandardMaterial({
       map: sfTex,
       roughness: 0.5,
@@ -1827,7 +1845,7 @@ export class TrackBuilder {
       polygonOffsetUnits: -4.0,
     });
     const sfMesh = new THREE.Mesh(sfGeo, sfMat);
-    sfMesh.position.set(0, 0.014, -this.halfSize);
+    sfMesh.position.set(-10.0, 0.014, -this.halfSize);
     sfMesh.renderOrder = 3;
     kerbGroup.add(sfMesh);
 
@@ -2838,49 +2856,58 @@ export class TrackBuilder {
     }
 
     // =========================================================================
-    // 2. NORTH BANK OPEN NATURAL VIEWING BERM (Sculpted Earth & Organic Tiers)
+    // 2. NORTH SECONDARY GRANDSTAND: PHOTOREALISTIC FIA MODULAR SCAFFOLDING & CANOPY
     // =========================================================================
-    // Independent North foundation mesh localized around Z = +154 (100% culled when facing South straight!)
-    const northWidth = 86;
-    const northFoundationGeo = this.createCurvedAmphitheaterTier(
-      northWidth,
-      16,
-      2.4,
-      1.8,
-      154.0,
-      28
-    );
-    const northConcreteMesh = new THREE.Mesh(northFoundationGeo, concreteMat);
-    northConcreteMesh.geometry.computeBoundingSphere();
-    northConcreteMesh.geometry.computeBoundingBox();
-    northConcreteMesh.castShadow = false;
-    northConcreteMesh.receiveShadow = false;
-    standsGroup.add(northConcreteMesh);
+    const northGrandstandGroup = new THREE.Group();
+    northGrandstandGroup.name = 'NorthSecondaryGrandstand';
 
-    // North Natural Green Viewing Tiers (Curved amphitheater tiers with green seating profile)
-    const northTierGeos: THREE.BufferGeometry[] = [];
-    for (let nt = 0; nt < 5; nt++) {
-      const nTierWidth = northWidth - nt * 3.0;
-      const nTierGeo = this.createCurvedAmphitheaterTier(
-        nTierWidth,
-        2.4,
-        1.0,
-        1.8 + nt * 0.95,
-        152.0 + nt * 2.2,
-        24
-      );
-      northTierGeos.push(nTierGeo);
-    }
-    const greenSeatMat = new THREE.MeshLambertMaterial({ color: 0x059669 });
-    const mergedNorthTier = safeMergeBufferGeometries(northTierGeos);
-    if (mergedNorthTier) {
-      const northTierMesh = new THREE.Mesh(mergedNorthTier, greenSeatMat);
-      northTierMesh.geometry.computeBoundingSphere();
-      northTierMesh.geometry.computeBoundingBox();
-      northTierMesh.castShadow = false;
-      northTierMesh.receiveShadow = false;
-      standsGroup.add(northTierMesh);
-    }
+    // A. Asynchronous Load of Blender-Baked Photorealistic Grandstand GLB
+    const gltfLoader = new GLTFLoader();
+    gltfLoader.load(
+      '/models/photorealistic_secondary_grandstand.glb',
+      (gltf) => {
+        const grandstandModel = gltf.scene;
+        const texLoader = new THREE.TextureLoader();
+        let bannerTexture: THREE.Texture | null = null;
+
+        grandstandModel.traverse((child) => {
+          if ((child as THREE.Mesh).isMesh) {
+            const mesh = child as THREE.Mesh;
+            mesh.castShadow = false;
+            mesh.receiveShadow = false;
+            mesh.geometry.computeBoundingSphere();
+            mesh.geometry.computeBoundingBox();
+            if (mesh.material) {
+              const mat = mesh.material as THREE.MeshStandardMaterial;
+              mat.roughness = Math.max(0.25, mat.roughness);
+              mat.side = THREE.DoubleSide;
+              if (mesh.name.includes('Banner') && !mat.map) {
+                if (!bannerTexture) {
+                  bannerTexture = texLoader.load('/textures/grandstands/sponsor_banner_apex.png');
+                  bannerTexture.anisotropy = 16;
+                }
+                mat.map = bannerTexture;
+              }
+              mat.needsUpdate = true;
+            }
+          }
+        });
+        // Clear procedural fallback meshes and add high-definition Blender model
+        while (northGrandstandGroup.children.length > 0) {
+          northGrandstandGroup.remove(northGrandstandGroup.children[0]);
+        }
+        northGrandstandGroup.add(grandstandModel);
+      },
+      undefined,
+      (err) => {
+        console.warn('Fallback to procedural secondary grandstand:', err);
+      }
+    );
+
+    // B. Immediate Procedural FIA Structural Grandstand (0-second pop-in fallback)
+    const procFallback = this.buildProceduralSecondaryGrandstandFallback();
+    northGrandstandGroup.add(procFallback);
+    standsGroup.add(northGrandstandGroup);
 
     // =========================================================================
     // 3. POPULATE DENSE 3D HUMAN SPECTATOR CROWD & ANIMATED FLAGS
@@ -2891,14 +2918,129 @@ export class TrackBuilder {
     const southCrowd = GrandstandCrowdSystem.generateSouthAmphitheaterCrowd(126, 10, 1.18, -149.5, 0.88);
     placements.push(...southCrowd);
 
-    // North Bank Natural Viewing Berm (5 tiers)
-    const northCrowd = GrandstandCrowdSystem.generateNorthBankCrowd(86, 5, 0.95, 152.0, 0.84);
+    // North Secondary Grandstand (6 tiers of cheering spectators & waving flags)
+    const northCrowd = GrandstandCrowdSystem.generateNorthBankCrowd(88, 6, 0.98, 152.0, 0.88);
     placements.push(...northCrowd);
 
     this.crowdSystem.generateCrowd(placements);
     this.group.add(this.crowdSystem.group);
 
     this.group.add(standsGroup);
+  }
+
+  /**
+   * Procedural FIA Secondary Grandstand Fallback:
+   * Scaffold lattice framework, aluminum decking, molded bucket seats, and cantilever canopy.
+   * Rendered immediately while the Blender-baked GLB loads in the background.
+   */
+  private buildProceduralSecondaryGrandstandFallback(): THREE.Group {
+    const group = new THREE.Group();
+    group.name = 'ProceduralSecondaryGrandstandFallback';
+
+    const steelMat = new THREE.MeshStandardMaterial({
+      color: 0x94a3b8,
+      metalness: 0.9,
+      roughness: 0.3,
+    });
+    const deckMat = new THREE.MeshStandardMaterial({
+      color: 0x64748b,
+      metalness: 0.8,
+      roughness: 0.4,
+    });
+    const concreteMat = new THREE.MeshStandardMaterial({
+      color: 0x334155,
+      roughness: 0.9,
+    });
+    const seatRedMat = new THREE.MeshStandardMaterial({
+      color: 0xdc2626,
+      roughness: 0.45,
+    });
+    const seatBlueMat = new THREE.MeshStandardMaterial({
+      color: 0x1d4ed8,
+      roughness: 0.45,
+    });
+    const canopyMat = new THREE.MeshStandardMaterial({
+      color: 0xf1f5f9,
+      roughness: 0.5,
+      side: THREE.DoubleSide,
+    });
+
+    const concreteGeos: THREE.BufferGeometry[] = [];
+    const deckGeos: THREE.BufferGeometry[] = [];
+    const scaffoldGeos: THREE.BufferGeometry[] = [];
+    const redSeatGeos: THREE.BufferGeometry[] = [];
+    const blueSeatGeos: THREE.BufferGeometry[] = [];
+
+    const width = 88;
+    const tiers = 6;
+    const tierRise = 0.98;
+    const tierRun = 2.15;
+    const baseZ = 152.0;
+    const baseY = 1.80;
+
+    // Foundation plinth
+    const fGeo = this.createCurvedAmphitheaterTier(width, 16, 2.4, baseY, baseZ + 6.0, 32);
+    concreteGeos.push(fGeo);
+
+    // Tiers & Seats
+    for (let t = 0; t < tiers; t++) {
+      const tWidth = width - t * 2.0;
+      const tY = baseY + t * tierRise;
+      const tZ = baseZ + t * tierRun;
+      const tierGeo = this.createCurvedAmphitheaterTier(tWidth, tierRun, tierRise, tY, tZ + tierRun * 0.5, 28);
+      deckGeos.push(tierGeo);
+
+      // Seats
+      const halfW = tWidth / 2;
+      const seatPitch = 1.0;
+      const count = Math.floor((tWidth - 2.4) / seatPitch);
+      for (let s = 0; s <= count; s++) {
+        const sx = -halfW + 1.2 + s * seatPitch;
+        if (Math.abs(sx) < 1.2 || Math.abs(sx - 24) < 1.2 || Math.abs(sx + 24) < 1.2) continue;
+        const curveOffset = Math.pow(sx / (width / 2), 2) * 3.2;
+        const sz = tZ + 0.65 + curveOffset;
+
+        const seatBox = new THREE.BoxGeometry(0.42, 0.38, 0.36);
+        seatBox.translate(sx, tY + 0.32, sz);
+        if (Math.abs(sx) < 14) {
+          blueSeatGeos.push(seatBox);
+        } else {
+          redSeatGeos.push(seatBox);
+        }
+      }
+    }
+
+    // Scaffolding rear pillars
+    for (let x = -40; x <= 40; x += 8) {
+      const cz = Math.pow(x / (width / 2), 2) * 3.2;
+      const pillarGeo = new THREE.CylinderGeometry(0.12, 0.12, 11.5, 6);
+      pillarGeo.translate(x, 5.75, baseZ + tiers * tierRun + cz);
+      scaffoldGeos.push(pillarGeo);
+    }
+
+    // Tensile canopy
+    const canopyGeo = this.createCurvedAmphitheaterTier(width + 2, 18, 0.15, baseY + tiers * tierRise + 4.8, baseZ + 5.5, 32);
+    const canopyMesh = new THREE.Mesh(canopyGeo, canopyMat);
+    canopyMesh.castShadow = false;
+    canopyMesh.receiveShadow = false;
+    group.add(canopyMesh);
+
+    const mConc = safeMergeBufferGeometries(concreteGeos);
+    if (mConc) group.add(new THREE.Mesh(mConc, concreteMat));
+
+    const mDeck = safeMergeBufferGeometries(deckGeos);
+    if (mDeck) group.add(new THREE.Mesh(mDeck, deckMat));
+
+    const mScaff = safeMergeBufferGeometries(scaffoldGeos);
+    if (mScaff) group.add(new THREE.Mesh(mScaff, steelMat));
+
+    const mRed = safeMergeBufferGeometries(redSeatGeos);
+    if (mRed) group.add(new THREE.Mesh(mRed, seatRedMat));
+
+    const mBlue = safeMergeBufferGeometries(blueSeatGeos);
+    if (mBlue) group.add(new THREE.Mesh(mBlue, seatBlueMat));
+
+    return group;
   }
 
   /**
@@ -2958,6 +3100,28 @@ export class TrackBuilder {
     curvedPaddock.add(stallMesh);
 
     this.group.add(curvedPaddock);
+  }
+
+  /**
+   * High-Tech Modern VIP Headquarters & Paddock Observation Complex
+   * Replaces the East wing outer trees flanking the South straight (X = 88.0, Z = -152.0),
+   * standing completely clear of the pit boxes and garages, facing the circuit with panoramic
+   * cantilevered terraces that project deep, realistic shadows across the track asphalt!
+   */
+  private buildModernVIPArchitecture(): void {
+    const modernVIPBuilding = ModernVIPBuildingBuilder.buildModernVIPBuilding(
+      { x: 88.0, y: 0, z: -152.0 },
+      Math.PI
+    );
+    this.group.add(modernVIPBuilding);
+
+    // Physical obstacle collision boundaries for modern headquarters complex
+    this.staticObstacles.push({
+      x: 88.0,
+      z: -152.0,
+      radius: 16.0,
+      type: 'building',
+    });
   }
 
   /**
@@ -3171,55 +3335,9 @@ export class TrackBuilder {
     }
 
     // =========================================================================
-    // 3. ROAD MARKINGS: FIA CHEVRON DECELERATION HATCHING & LIMITER LINE
+    // 3. ROAD MARKINGS: PIT LIMITER LINE & DECELERATION RUBBER
     // =========================================================================
-    // A. Triangular Chevron Island between Main Track and Pit Lane (x: -74 to -48)
-    const chevronGeo = new THREE.PlaneGeometry(28, 7.5);
-    chevronGeo.rotateX(-Math.PI / 2);
-    chevronGeo.rotateY(0.28);
-    const chevronCanvas = document.createElement('canvas');
-    chevronCanvas.width = 512;
-    chevronCanvas.height = 256;
-    const chCtx = chevronCanvas.getContext('2d')!;
-    chCtx.fillStyle = 'rgba(20, 20, 25, 0.0)'; // Transparent base
-    chCtx.fillRect(0, 0, 512, 256);
-
-    // Solid Perimeter White Line
-    chCtx.strokeStyle = '#ffffff';
-    chCtx.lineWidth = 14;
-    chCtx.beginPath();
-    chCtx.moveTo(20, 230);
-    chCtx.lineTo(490, 128);
-    chCtx.lineTo(20, 26);
-    chCtx.closePath();
-    chCtx.stroke();
-
-    // Diagonal White Chevron Stripes (FIA Safety Standard)
-    chCtx.lineWidth = 16;
-    for (let px = 60; px < 460; px += 42) {
-      chCtx.beginPath();
-      chCtx.moveTo(px, 220);
-      chCtx.lineTo(px + 45, 128);
-      chCtx.lineTo(px, 36);
-      chCtx.stroke();
-    }
-
-    const chevronTex = new THREE.CanvasTexture(chevronCanvas);
-    const chevronMat = new THREE.MeshBasicMaterial({
-      map: chevronTex,
-      transparent: true,
-      opacity: 0.95,
-      depthWrite: false,
-      polygonOffset: true,
-      polygonOffsetFactor: -2.0,
-      polygonOffsetUnits: -4.0,
-    });
-    const chevronMesh = new THREE.Mesh(chevronGeo, chevronMat);
-    chevronMesh.position.set(-61, 0.012, -124.8);
-    chevronMesh.renderOrder = 2;
-    pitEntryGroup.add(chevronMesh);
-
-    // B. Transverse Pit Limiter Ground Road Line (at x = -54, spanning exactly the wide pit lane)
+    // Transverse Pit Limiter Ground Road Line (at x = -54, spanning exactly the wide pit lane)
     const limiterLineGeo = new THREE.PlaneGeometry(1.6, 15.5);
     limiterLineGeo.rotateX(-Math.PI / 2);
     const limiterCanvas = document.createElement('canvas');
@@ -3593,8 +3711,6 @@ export class TrackBuilder {
       { x: 0, z: -178, tx: 0, tz: -130 },
       { x: 40, z: -178, tx: 40, tz: -130 },
       { x: 75, z: -178, tx: 75, tz: -130 },
-      // South Infield Pit Tower - Aiming South onto Pit Lane & Track
-      { x: -10, z: -92, tx: -10, tz: -116 },
 
       // Turn 1 Corner Outer Towers (South-East) - Aiming at Turn 1 apex & exit
       { x: 125, z: -156, tx: 110, tz: -125 },
@@ -3882,13 +3998,18 @@ export class TrackBuilder {
      * - Gravel runoff traps
      */
     const isTreeSafe = (x: number, z: number, canopyR: number): boolean => {
+      // 0. Curva 1 Exterior Exclusion Zone (strictly eliminates all trees & shrubs outside Turn 1)
+      if (this.isTurn1Exterior(x, z)) {
+        return false;
+      }
+
       // 1. South Main Grandstand Exclusion Zone (including canopy & VIP box)
       if (x >= -72 - canopyR && x <= 72 + canopyR && z >= -170 - canopyR && z <= -138.0 + canopyR) {
         return false;
       }
 
       // 2. North Grandstand Exclusion Zone
-      if (x >= -50 - canopyR && x <= 50 + canopyR && z >= 139.0 - canopyR && z <= 165 + canopyR) {
+      if (x >= -50 - canopyR && x <= 50 + canopyR && z >= 139.0 - canopyR && z <= 170.0 + canopyR) {
         return false;
       }
 
@@ -3897,12 +4018,13 @@ export class TrackBuilder {
         return false;
       }
 
-      // 5. Helipad (radius 18m around 30, 30)
-      if (Math.hypot(x - 30, z - 30) < 18 + canopyR) {
+      // 4. Start/Finish Straight Building & Garage Corridor Exclusion Zone (z < -65, |x| <= 145)
+      // Strictly eliminates all trees next to the Pit Building & Garages, Modern VIP Building, and Grandstand along the recta de meta
+      if (z < -65 && Math.abs(x) <= 145) {
         return false;
       }
 
-      // 6. Track Surface, Kerbs & Starting Grid
+      // 5. Track Surface, Kerbs & Starting Grid
       // Straight Tracks (120 to 140 from center line)
       if (Math.abs(x) <= 92 && z >= -140.0 - canopyR && z <= -120.0 + canopyR) return false;
       if (Math.abs(x) <= 92 && z >= 120.0 - canopyR && z <= 140.0 + canopyR) return false;
@@ -3966,6 +4088,9 @@ export class TrackBuilder {
     };
 
     const tryAddTree = (x: number, z: number, type: 'pine' | 'oak' | 'cypress', scale = 1.35) => {
+      // Strictly eliminate all trees along the start/finish straight and adjacent to its buildings
+      if (z < -65 && Math.abs(x) <= 145) return;
+
       const canopyR = type === 'cypress' ? 1.4 * scale : (type === 'pine' ? 2.8 * scale : 3.4 * scale);
       if (!isTreeSafe(x, z, canopyR)) return;
 
@@ -3991,21 +4116,7 @@ export class TrackBuilder {
     // CORRIDOR 1: OUTFIELD WALL TREE CORRIDOR (Hugging outer barriers & fences)
     // =========================================================================
 
-    // 1. South Outer Wall Corridor (Safely flanking the South Grandstand)
-    // West wing of South straight (x = -135 to -74, z = -148 to -162)
-    for (let x = -135; x <= -74; x += 11.0) {
-      const type = Math.abs(x) % 2 === 0 ? 'pine' : 'oak';
-      tryAddTree(x, -150 - (Math.abs(x * 5) % 6), type, 1.4);
-    }
-    // East wing of South straight (x = 74 to 135, z = -148 to -162)
-    for (let x = 74; x <= 135; x += 11.0) {
-      const type = Math.abs(x) % 2 === 0 ? 'oak' : 'pine';
-      tryAddTree(x, -150 - (Math.abs(x * 5) % 6), type, 1.4);
-    }
-    // Forest backdrop behind South Grandstand (z = -174 to -188, completely clear of canopy)
-    for (let x = -65; x <= 65; x += 13.0) {
-      tryAddTree(x, -178 - (Math.abs(x * 7) % 8), 'pine', 1.6);
-    }
+    // 1. South Outer Wall Corridor: Flanked by Start/Finish Straight buildings, garages & grandstands (no trees)
 
     // 2. North Outer Wall Corridor (Safely flanking the North Grandstand)
     // West wing of North straight (x = -135 to -52, z = 149 to 162)
@@ -4025,6 +4136,7 @@ export class TrackBuilder {
 
     // 3. East Outer Wall Corridor (x ≈ 150 to 164, z = -120 to 120)
     for (let z = -125; z <= 125; z += 11.5) {
+      if (z <= -75) continue; // Exclude trees flanking Turn 1 exterior
       const type = Math.abs(z) % 2 === 0 ? 'pine' : 'oak';
       tryAddTree(152 + (Math.abs(z * 5) % 8), z, type, 1.4);
     }
@@ -4045,6 +4157,9 @@ export class TrackBuilder {
     ];
 
     cornerAngles.forEach(({ cx, cz, startAng }) => {
+      // Exclude Turn 1 outer forest amphitheater (exterior of Turn 1)
+      if (cx === c && cz === -c) return;
+
       // Tier 1: Near forest edge (r = 66.5 to 73m, flanking the runoff barrier)
       for (let a = 0.05; a < Math.PI / 2 - 0.05; a += 0.075) {
         const ang = startAng + a;
@@ -4103,10 +4218,8 @@ export class TrackBuilder {
       tryAddTree(-111.5 + (Math.abs(z * 3) % 2), z, type, 1.25);
     }
 
-    // 4. South Infield: VIP Cypress Boulevard safely situated behind Team Paddock yard (z = -78, clear of all pit lanes)
-    for (let x = -50; x <= 50; x += 9.5) {
-      tryAddTree(x, -78, 'cypress', 1.35);
-    }
+    // 4. South Infield: Replaced by Modern VIP Paddock Headquarters & Skybridge Complex (z = -74)
+    // Trees in this sector removed per user instruction and replaced with high-tech architectural complex.
 
     // 5. 4 CORNER INNER APEX BOTANICAL GROVES (Inside apex curves at r = 8 to 19m)
     cornerAngles.forEach(({ cx, cz }) => {
@@ -4143,12 +4256,12 @@ export class TrackBuilder {
     for (let z = -75; z <= 75; z += 8.0) barrierBushPositions.push([114.5, z, 1.05]);
     // Along West inner barrier meadow (x ≈ -114)
     for (let z = -75; z <= 75; z += 8.0) barrierBushPositions.push([-114.5, z, 1.05]);
-    // Along South outer barrier meadow (only west and east of grandstand)
-    for (let x = -125; x <= -76; x += 8.5) barrierBushPositions.push([x, -145.5, 1.1]);
-    for (let x = 76; x <= 125; x += 8.5) barrierBushPositions.push([x, -145.5, 1.1]);
+    // Along South outer barrier meadow: clear of vegetation along recta de meta buildings
 
     // Outer corner shrub hedges (r = 65.2m, nestled right behind corner gravel traps)
     cornerAngles.forEach(({ cx, cz, startAng }) => {
+      // Exclude Turn 1 outer shrub hedges (exterior of Turn 1)
+      if (cx === c && cz === -c) return;
       for (let a = 0.05; a < Math.PI / 2 - 0.05; a += 0.08) {
         const ang = startAng + a;
         barrierBushPositions.push([cx + Math.cos(ang) * 65.2, cz + Math.sin(ang) * 65.2, 1.15]);
@@ -4165,6 +4278,8 @@ export class TrackBuilder {
     });
 
     barrierBushPositions.forEach(([bx, bz, scale]) => {
+      // Strictly eliminate all shrubs along the start/finish straight and adjacent to its buildings
+      if (bz < -65 && Math.abs(bx) <= 145) return;
       const bushR = 1.2 * scale;
       if (isTreeSafe(bx, bz, bushR)) {
         const rotY = (Math.abs(bx * 19 + bz * 23) % 628) / 100;
@@ -4195,76 +4310,6 @@ export class TrackBuilder {
     );
 
     this.group.add(vegGroup);
-  }
-
-  /**
-   * Team Hospitality Transporter Semitrucks Parked in Paddock Area
-   */
-  private buildPaddockTransportersAndTrailers(): void {
-    const paddockTruckGroup = new THREE.Group();
-    const teamColors = [0xdc2626, 0x2563eb, 0x059669, 0xd97706, 0x7c3aed, 0xdb2777];
-
-    const stripeGeos: THREE.BufferGeometry[] = [];
-    const wheelGeos: THREE.BufferGeometry[] = [];
-    const awningGeos: THREE.BufferGeometry[] = [];
-
-    const baseStripeGeo = new THREE.BoxGeometry(12.55, 0.4, 2.62);
-    const baseAwningGeo = new THREE.BoxGeometry(12.0, 0.15, 3.5);
-    const baseWheelGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.35, 12);
-    baseWheelGeo.rotateX(Math.PI / 2);
-
-    for (let i = 0; i < 6; i++) {
-      const truckX = -42 + i * 15;
-      const truckZ = -92;
-
-      // Main Trailer Box (13.6m length x 2.6m width x 4m height)
-      const trailerGeo = new THREE.BoxGeometry(12.5, 3.8, 2.6);
-      const trailerMat = new THREE.MeshStandardMaterial({
-        color: teamColors[i],
-        metalness: 0.85,
-        roughness: 0.25,
-      });
-      const trailer = new THREE.Mesh(trailerGeo, trailerMat);
-      trailer.position.set(truckX, 2.4, truckZ);
-      trailer.castShadow = false;
-      paddockTruckGroup.add(trailer);
-
-      // Chrome Trim / Livery Stripe
-      const sGeo = baseStripeGeo.clone();
-      sGeo.translate(truckX, 2.4, truckZ);
-      stripeGeos.push(sGeo);
-
-      // Wheels
-      [-4, -2.5, 4].forEach((wx) => {
-        [-1.35, 1.35].forEach((wz) => {
-          const wGeo = baseWheelGeo.clone();
-          wGeo.translate(truckX + wx, 0.5, truckZ + wz);
-          wheelGeos.push(wGeo);
-        });
-      });
-
-      // Paddock Team Hospitality Awning / Canopy Roof
-      const aGeo = baseAwningGeo.clone();
-      aGeo.translate(truckX, 3.8, truckZ + 2.8);
-      awningGeos.push(aGeo);
-    }
-
-    if (stripeGeos.length > 0) {
-      const mergedStripe = this.mergeAndDispose(stripeGeos);
-      if (mergedStripe) paddockTruckGroup.add(new THREE.Mesh(mergedStripe, this.metalSilverMat));
-    }
-    if (wheelGeos.length > 0) {
-      const wheelMat = new THREE.MeshStandardMaterial({ color: 0x09090b, roughness: 0.8 });
-      const mergedWheel = this.mergeAndDispose(wheelGeos);
-      if (mergedWheel) paddockTruckGroup.add(new THREE.Mesh(mergedWheel, wheelMat));
-    }
-    if (awningGeos.length > 0) {
-      const awningMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.6 });
-      const mergedAwning = this.mergeAndDispose(awningGeos);
-      if (mergedAwning) paddockTruckGroup.add(new THREE.Mesh(mergedAwning, awningMat));
-    }
-
-    this.group.add(paddockTruckGroup);
   }
 
   /**
@@ -4300,8 +4345,6 @@ export class TrackBuilder {
   private buildTVBroadcastTowersAndCranes(): void {
     const tvGroup = new THREE.Group();
     const towerCoords = [
-      { x: 55, z: -55, rot: -Math.PI / 4 },
-      { x: -55, z: 55, rot: (3 * Math.PI) / 4 },
       { x: 0, z: -146, rot: 0 },
     ];
 

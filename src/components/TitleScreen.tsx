@@ -32,7 +32,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({ onEnter }) => {
         isTransitioning ? 'opacity-0 scale-105 pointer-events-none' : 'opacity-100 scale-100'
       }`}
       style={{
-        background: 'radial-gradient(ellipse at 50% 45%, rgba(15, 23, 42, 0.45) 0%, rgba(7, 10, 15, 0.82) 55%, rgba(2, 3, 6, 0.96) 100%)',
+        background: 'radial-gradient(ellipse at 50% 45%, #0f172a 0%, #070a0f 55%, #020306 100%)',
       }}
     >
       {/* Top Header: Elite FIA Federation & Simulation Metadata */}
@@ -85,12 +85,12 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({ onEnter }) => {
             <div className="absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000 bg-gradient-to-r from-transparent via-white/30 to-transparent skew-x-12" />
 
             <Play className="w-4 h-4 fill-white text-white group-hover:scale-110 transition-transform duration-300" />
-            <span className="relative z-10 drop-shadow-md">JUGAR</span>
+            <span className="relative z-10 drop-shadow-md">COMENZAR</span>
           </button>
 
           {/* Clean Touch Action Hint */}
           <span className="text-[10px] tracking-[0.25em] text-neutral-400/80 font-mono mt-1 uppercase">
-            TOCA EL BOTÓN PARA INICIAR
+            TOCA EL BOTÓN PARA COMENZAR
           </span>
         </div>
       </main>

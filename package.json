@@ -12,9 +12,6 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "@babylonjs/core": "^9.29.0",
-    "@babylonjs/loaders": "^9.29.0",
-    "@babylonjs/materials": "^9.29.0",
     "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-react": "^6.1.1",
@@ -22,7 +19,6 @@
     "express": "^4.21.2",
     "jszip": "^3.10.2",
     "lucide-react": "^0.546.0",
-    "motion": "^12.23.24",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "three": "^0.186.1",

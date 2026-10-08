@@ -15,6 +15,7 @@ import { CinematicPostEffect } from './effects/CinematicPostEffect';
 import { PitStopManager } from './pit/PitStopManager';
 import { CarInputs, VehiclePhysics } from './physics/VehiclePhysics';
 import { DynamicProp, StaticObstacle, TrackBuilder } from './world/TrackBuilder';
+import { DistantMountainBackdropBuilder } from './world/DistantMountainBackdropBuilder';
 import { RivalTelemetryData } from './multiplayer/MultiplayerClient';
 import { RivalCarInterpolator } from './multiplayer/RivalCarInterpolator';
 import { TireCompoundType } from './physics/TireCompound';
@@ -23,7 +24,6 @@ import { CareerRaceConfig, DriverLeaderboardEntry, RaceDifficulty, RaceLapOption
 import { AICarController } from './ai/AICarController';
 import { CircuitId, ICircuitDefinition, ITrackWorld } from './circuits/ICircuit';
 import { getCircuit, DEFAULT_CIRCUIT_ID } from './circuits/CircuitRegistry';
-import { BabylonRenderAdapter } from './render/BabylonRenderAdapter';
 
 export type CameraViewMode = 'chase' | 'hood' | 'bumper' | 'orbit';
 export type CameraDistanceMode = 'near' | 'medium' | 'far';
@@ -98,8 +98,6 @@ export class RacingGameEngine {
   public cinematicOptics: CinematicPostEffect;
   public pitStop: PitStopManager;
   public careerRaceManager: CareerRaceManager;
-  public babylonAdapter: BabylonRenderAdapter;
-  public renderEngine: 'three' | 'babylon' = 'three';
   private cameraTrauma = 0;
 
   // Natural Daylight Atmosphere, Dynamic Sky & Soft Shadows
@@ -269,7 +267,7 @@ export class RacingGameEngine {
     carModel: CarModel;
     isInPit: boolean;
     aiRef?: AICarController;
-  }> = Array.from({ length: 32 }, () => ({
+  }> = Array.from({ length: 4 }, () => ({
     id: '',
     physics: null as any,
     isPlayer: false,
@@ -326,17 +324,11 @@ export class RacingGameEngine {
     this.renderer.setSize(w, h);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFShadowMap; // Ultra-fast hardware PCF filtering (eliminates fillrate stalls)
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap; // Ultra-realistic soft shadows with smooth penumbra
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.08;
+    this.renderer.toneMappingExposure = 1.12;
 
     container.innerHTML = '';
-    this.renderer.domElement.style.position = 'absolute';
-    this.renderer.domElement.style.top = '0';
-    this.renderer.domElement.style.left = '0';
-    this.renderer.domElement.style.width = '100%';
-    this.renderer.domElement.style.height = '100%';
-    this.renderer.domElement.style.display = 'block'; // High-fidelity visual engine active
     container.appendChild(this.renderer.domElement);
 
     // 4. Subsystems
@@ -353,12 +345,6 @@ export class RacingGameEngine {
     this.pitStop = new PitStopManager();
     this.careerRaceManager = new CareerRaceManager(this.scene);
     this.careerRaceManager.setCircuit(this.activeCircuit);
-
-    // 4.1 Initialize Next-Gen Babylon.js WebGPU / WebGL2 Render Adapter
-    this.babylonAdapter = new BabylonRenderAdapter();
-    this.babylonAdapter.init(this.container, this.activeCircuit).catch((err) => {
-      console.warn('BabylonRenderAdapter initialization warning:', err);
-    });
 
     this.scene.add(this.track.group);
     this.scene.add(this.carModel.group);
@@ -377,7 +363,6 @@ export class RacingGameEngine {
     this.physics.onBackfire = (isHighRpm) => {
       this.audio.triggerBackfire(isHighRpm);
       this.carModel.triggerBackfire(isHighRpm);
-      this.babylonAdapter?.triggerPlayerBackfire(isHighRpm);
 
       const leftPipe = this._scratchPipeL;
       const rightPipe = this._scratchPipeR;
@@ -437,27 +422,27 @@ export class RacingGameEngine {
     // Angular azimuth creates intense high-contrast diagonal forward shadows across the track.
     this.dirLight = new THREE.DirectionalLight(0xfffaee, 5.8);
 
-    // Optimal F1 broadcast solar orientation: positioned behind and to the right of the starting grid
-    // (-36m behind along X, +42m right along Z, elevation 24m at ~23° angle)
-    // Projects dramatic, elongated aerodynamic shadows FORWARD and to the LEFT across the asphalt!
+    // Optimal F1 Grand Prix solar orientation: positioned behind and to the South outfield
+    // (-28m behind along X, -36m along Z, elevation 26m at ~33° angle)
+    // Projects dramatic, elongated architectural shadows FORWARD and ACROSS the circuit asphalt!
     const initCarX = -35;
     const initCarZ = -130;
-    this.dirLight.position.set(initCarX - 36, 24, initCarZ + 42);
-    this.dirLight.target.position.set(initCarX, 0, initCarZ);
+    this.dirLight.position.set(initCarX - 28, 26, initCarZ - 36);
+    this.dirLight.target.position.set(initCarX + 6, 0, initCarZ);
     this.dirLight.castShadow = true;
 
-    // Studio-grade 1024x1024 depth texture & 24m frustum for razor-sharp vehicle & aero shadows with optimal L2 cache performance
-    this.dirLight.shadow.mapSize.width = 1024;
-    this.dirLight.shadow.mapSize.height = 1024;
+    // Studio-grade 2048x2048 depth texture & 85m frustum for razor-sharp vehicle, trackside architecture & modern building shadows
+    this.dirLight.shadow.mapSize.width = 2048;
+    this.dirLight.shadow.mapSize.height = 2048;
     this.dirLight.shadow.camera.near = 5;
-    this.dirLight.shadow.camera.far = 120;
-    const shadowD = 24;
+    this.dirLight.shadow.camera.far = 180;
+    const shadowD = 85;
     this.dirLight.shadow.camera.left = -shadowD;
     this.dirLight.shadow.camera.right = shadowD;
     this.dirLight.shadow.camera.top = shadowD;
     this.dirLight.shadow.camera.bottom = -shadowD;
     this.dirLight.shadow.bias = -0.0001;
-    this.dirLight.shadow.normalBias = 0.012;
+    this.dirLight.shadow.normalBias = 0.015;
     this.dirLight.shadow.camera.updateProjectionMatrix();
 
     this.scene.add(this.dirLight);
@@ -465,9 +450,10 @@ export class RacingGameEngine {
     this.dirLight.target.updateMatrixWorld();
     this.dirLight.updateMatrixWorld();
 
-    // Sync sun vector with volumetric particle lighting
-    const sunVec = new THREE.Vector3(-36, 24, 42).normalize();
+    // Sync sun vector with volumetric particle lighting and mountain backdrop
+    const sunVec = new THREE.Vector3(-34, 26, -36).normalize();
     this.particles.setSunDirection(sunVec);
+    DistantMountainBackdropBuilder.updateSunDirection(sunVec, this.dirLight.color);
   }
 
   /**
@@ -479,18 +465,19 @@ export class RacingGameEngine {
    */
   private setupSkybox(): void {
     this.dynamicSky = new DynamicSkySystem({
-      zenithColor: new THREE.Color(0x1652c4),
+      zenithColor: new THREE.Color(0x134ec4),
       horizonColor: new THREE.Color(0x9ebfd6),
       sunColor: new THREE.Color(0xfffaee),
       groundHazeColor: new THREE.Color(0x9ebfd6),
-      cloudCoverage: 0.50,
-      cloudDensity: 0.92,
+      cloudCoverage: 0.48,
+      cloudDensity: 0.94,
     });
     this.scene.add(this.dynamicSky.group);
 
     // Align sun position with directional lighting
     const sunDir = this.dirLight.position.clone().sub(this.dirLight.target.position).normalize();
     this.dynamicSky.setSunDirection(sunDir);
+    DistantMountainBackdropBuilder.updateSunDirection(sunDir, this.dirLight.color);
 
     // Generate seamless 360° PBR environment map for realistic reflections
     const envMap = this.dynamicSky.generateEnvironmentMap(this.renderer);
@@ -513,7 +500,6 @@ export class RacingGameEngine {
       : Math.min(window.devicePixelRatio || 1, 1.30);
     this.renderer.setPixelRatio(pixelRatio);
     this.renderer.setSize(w, h);
-    this.babylonAdapter?.resize();
   };
 
   private onKeyDown = (e: KeyboardEvent): void => {
@@ -647,7 +633,7 @@ export class RacingGameEngine {
     // 10. Audio update
     const speedMs = this.isPaused ? 0 : Math.abs(this.physics.speed);
     this.audio.update(
-      this.isPaused ? 1000 : this.physics.rpm,
+      this.isPaused ? 800 : this.physics.rpm,
       this.isPaused ? 0 : this.inputs.throttle,
       this.isPaused ? 0 : this.physics.slipRatio,
       speedMs,
@@ -660,21 +646,8 @@ export class RacingGameEngine {
       this.dynamicSky.update(rawDt, this.camera.position);
     }
 
-    // 11. Render Scene via Selected Engine
-    if (this.renderEngine === 'three') {
-      this.renderer.render(this.scene, this.camera);
-    } else if (this.babylonAdapter && this.babylonAdapter.scene) {
-      this.babylonAdapter.updateCamera(this.cameraPos, this.cameraTarget, this.currentTargetFov);
-      this.babylonAdapter.updatePlayerCar(this.physics, this.inputs, rawDt);
-      if (this.isMultiplayer) {
-        this.babylonAdapter.updateRivalCar(this.rivalPhysics, this.rivalTelemetry, rawDt);
-      }
-      if (!this.isFreePractice && this.careerRaceManager.aiCars.length > 0) {
-        this.babylonAdapter.updateAICars(this.careerRaceManager.aiCars, rawDt);
-      }
-      this.babylonAdapter.updateDynamicProps(this.track.dynamicProps);
-      this.babylonAdapter.render();
-    }
+    // 11. Render Scene
+    this.renderer.render(this.scene, this.camera);
 
     // 12. Dispatch Telemetry (Zero-allocation in-place update)
     this.telemetryTimer += rawDt;
@@ -1611,8 +1584,8 @@ export class RacingGameEngine {
     );
 
     // Continuous smooth directional shadow tracking without 0.5m discrete jumping artifacts
-    this.dirLight.position.set(interpX - 36, 24, interpZ + 42);
-    this.dirLight.target.position.set(interpX, 0, interpZ);
+    this.dirLight.position.set(interpX - 28, 26, interpZ - 36);
+    this.dirLight.target.position.set(interpX + 6, 0, interpZ);
   }
 
   private updateParticles(dt: number): void {
@@ -2065,32 +2038,22 @@ export class RacingGameEngine {
 
   public setCameraDistance(distance: CameraDistanceMode): void {
     this.cameraDistance = distance;
-    this.cameraMode = 'chase';
-  }
-
-  public setRenderEngine(engine: 'three' | 'babylon'): void {
-    this.renderEngine = engine;
-    if (engine === 'three') {
-      if (this.renderer?.domElement) this.renderer.domElement.style.display = 'block';
-      if (this.babylonAdapter?.canvas) this.babylonAdapter.canvas.style.display = 'none';
-    } else {
-      if (this.renderer?.domElement) this.renderer.domElement.style.display = 'none';
-      if (this.babylonAdapter?.canvas) this.babylonAdapter.canvas.style.display = 'block';
-    }
+    this.setCameraMode('chase');
   }
 
   public nextCameraDistance(): CameraDistanceMode {
     const distances: CameraDistanceMode[] = ['near', 'medium', 'far'];
     const idx = distances.indexOf(this.cameraDistance);
     this.cameraDistance = distances[(idx + 1) % distances.length];
-    this.cameraMode = 'chase';
+    this.setCameraMode('chase');
     return this.cameraDistance;
   }
 
   public nextCameraMode(): CameraViewMode {
     const modes: CameraViewMode[] = ['chase', 'hood', 'bumper', 'orbit'];
     const idx = modes.indexOf(this.cameraMode);
-    this.cameraMode = modes[(idx + 1) % modes.length];
+    const next = modes[(idx + 1) % modes.length];
+    this.setCameraMode(next);
     return this.cameraMode;
   }
 
@@ -2274,7 +2237,6 @@ export class RacingGameEngine {
     this.physics.setTireCompound(compound);
     this.pitStop.nextTireCompound = compound;
     this.carModel.setTireCompoundVisuals(compound);
-    this.babylonAdapter?.setPlayerTireCompound(compound);
   }
 
   public setNextPitTireCompound(compound: TireCompoundType): void {
@@ -2309,7 +2271,6 @@ export class RacingGameEngine {
 
     // Sync Career and AI
     this.careerRaceManager.setCircuit(newCircuit);
-    this.babylonAdapter?.setCircuit(newCircuit);
 
     this.currentSector = 0;
     this.currentLapTime = 0;
@@ -2358,7 +2319,6 @@ export class RacingGameEngine {
       this.renderer.compile(this.scene, this.camera);
       // Perform a single warm-up render pass so textures, shadow map render targets and GPU pipelines are fully bound
       this.renderer.render(this.scene, this.camera);
-      this.babylonAdapter?.render();
     } catch (e) {
       console.warn('Pre-warm completed with warning:', e);
     }
@@ -2527,9 +2487,6 @@ export class RacingGameEngine {
     }
     if (this.audio && typeof this.audio.dispose === 'function') {
       this.audio.dispose();
-    }
-    if (this.babylonAdapter) {
-      this.babylonAdapter.dispose();
     }
     if (this.renderer) {
       this.renderer.dispose();

@@ -1,6 +1,6 @@
 /**
  * CareerRaceManager.ts - 2-Car 1v1 Grand Prix Race Coordinator (Player vs Rival)
- * Manages grid positions, 5 red lights start countdown, live 1v1 telemetry leaderboard,
+ * Manages grid positions, authentic 5-red-lights start countdown, live 1v1 telemetry leaderboard,
  * FIA mandatory 2-compound rules enforcement, and podium finish.
  */
 
@@ -43,7 +43,7 @@ export class CareerRaceManager {
   public playerCompoundsUsed: Set<TireCompoundType> = new Set();
   public playerPitStopsCount: number = 0;
 
-  // Stored Leaderboard (Pre-allocated pool for 100% zero GC allocations)
+  // Stored Leaderboard (Pre-allocated pool for 100% zero GC allocations in 1v1 duel)
   public leaderboard: DriverLeaderboardEntry[] = [];
   public raceWinner: DriverLeaderboardEntry | null = null;
   public playerFinishPosition: number | null = null;
@@ -60,7 +60,7 @@ export class CareerRaceManager {
     isPlayer: boolean;
     score: number;
     ai?: AICarController;
-  }> = Array.from({ length: 16 }, () => ({
+  }> = Array.from({ length: 2 }, () => ({
     id: '',
     isPlayer: false,
     score: 0,
@@ -81,7 +81,7 @@ export class CareerRaceManager {
   }
 
   /**
-   * Ensures AI cars exist in scene only when required for Career Grand Prix mode
+   * Ensures AI rival car exists in scene only when required for Career Grand Prix mode
    */
   public ensureAiGrid(): void {
     if (this.aiCars.length > 0) return;
@@ -89,7 +89,7 @@ export class CareerRaceManager {
   }
 
   /**
-   * Cleans up all AI car 3D models and controllers from the scene when entering Practice or Multiplayer
+   * Cleans up AI rival car 3D model and controller from the scene when entering Practice or Multiplayer
    */
   public clearAiGrid(): void {
     for (const car of this.aiCars) {
@@ -104,7 +104,7 @@ export class CareerRaceManager {
   }
 
   /**
-   * Initializes the 4 AI Rival Cars with their official team liveries and compounds
+   * Initializes the AI Rival Car (Scuderia Leclerc #16) for 1v1 Grand Prix
    */
   private initAiGrid(): void {
     // Clear existing AI cars if any
@@ -116,27 +116,21 @@ export class CareerRaceManager {
     }
     this.aiCars = [];
 
-    // AI Teams: Scuderia (#16), Silver Arrow (#63), Papaya (#4), Emerald (#14)
-    const aiTeams = RACE_TEAMS.slice(1);
-    const startingCompounds: TireCompoundType[] = ['medium', 'soft', 'medium', 'hard'];
+    // AI Rival Team: Scuderia Corsa (#16, C. Leclerc)
+    const rivalTeam = RACE_TEAMS[1] || RACE_TEAMS[0];
+    const ai = new AICarController(
+      rivalTeam,
+      this.config.difficulty,
+      'medium',
+      this.config.totalLaps
+    );
 
-    aiTeams.forEach((team, idx) => {
-      const startComp = startingCompounds[idx % startingCompounds.length];
-      const ai = new AICarController(
-        team,
-        this.config.difficulty,
-        startComp,
-        this.config.totalLaps
-      );
+    ai.setCircuit(this.activeCircuit);
+    // Grid Slot 2 (P2, alongside Pole Player)
+    ai.setGridPosition(2);
 
-      ai.setCircuit(this.activeCircuit);
-
-      // Grid Slots: Slot 1 is Player (P1 Pole), Slot 2 to 5 are AI cars
-      ai.setGridPosition(idx + 2);
-
-      this.scene.add(ai.carModel.group);
-      this.aiCars.push(ai);
-    });
+    this.scene.add(ai.carModel.group);
+    this.aiCars.push(ai);
   }
 
   /**
@@ -144,9 +138,9 @@ export class CareerRaceManager {
    */
   public setCircuit(circuit: ICircuitDefinition): void {
     this.activeCircuit = circuit;
-    this.aiCars.forEach((ai, idx) => {
+    this.aiCars.forEach((ai) => {
       ai.setCircuit(circuit);
-      ai.setGridPosition(idx + 2);
+      ai.setGridPosition(2);
     });
   }
 
@@ -176,18 +170,18 @@ export class CareerRaceManager {
     playerPhysics.speed = 0;
     playerPhysics.gear = 1;
 
-    // Ensure AI cars exist if previously disposed (e.g. after Free Practice)
+    // Ensure AI rival car exists if previously disposed (e.g. after Free Practice)
     if (this.aiCars.length === 0) {
       this.initAiGrid();
     }
 
-    // Reset AI cars on their F1 grid slots (Slot 2 to 5)
-    this.aiCars.forEach((ai, idx) => {
+    // Reset AI rival on F1 grid slot 2 (P2)
+    this.aiCars.forEach((ai) => {
       ai.difficulty = this.config.difficulty;
       ai.totalLaps = this.config.totalLaps;
       ai.planPitStrategy(this.config.totalLaps);
       ai.setCircuit(this.activeCircuit);
-      ai.setGridPosition(idx + 2);
+      ai.setGridPosition(2);
     });
   }
 
@@ -210,7 +204,7 @@ export class CareerRaceManager {
   }
 
   /**
-   * Main Frame Update: Simulation of all 4 AI pilots and live race standings calculation
+   * Main Frame Update: Simulation of 1v1 AI Rival pilot and live race standings calculation
    */
   public update(
     dt: number,
@@ -275,7 +269,7 @@ export class CareerRaceManager {
       }
     }
 
-    // 3. Compute Live F1 Leaderboard & Real-Time Positions (P1 to P5) - Throttled to 10 Hz
+    // 3. Compute Live F1 Leaderboard & Real-Time Positions (P1 vs P2 1v1 Duel) - Throttled to 10 Hz
     this.leaderboardTimer += dt;
     if (this.leaderboardTimer < 0.10 && this.leaderboard.length > 0) {
       return;

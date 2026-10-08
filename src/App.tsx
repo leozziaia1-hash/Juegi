@@ -38,7 +38,7 @@ export default function App() {
   const [isLoadingRace, setIsLoadingRace] = useState(false);
   const [isFadingOutLoading, setIsFadingOutLoading] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(0);
-  const [loadingStageText, setLoadingStageText] = useState('Inicializando motor gráfico Babylon.js (WebGPU / WebGL2)...');
+  const [loadingStageText, setLoadingStageText] = useState('Inicializando motor 3D y renderizador WebGL2...');
   const [pendingRaceConfig, setPendingRaceConfig] = useState<{
     circuitId: CircuitId;
     mode: 'career' | 'practice' | 'multiplayer';
@@ -236,23 +236,6 @@ export default function App() {
     };
   }, []);
 
-  // Mount 3D engine on viewport container immediately so scene renders right away
-  useEffect(() => {
-    if (containerRef.current && !engineRef.current) {
-      const eng = new RacingGameEngine(containerRef.current, selectedCircuitRef.current);
-      engineRef.current = eng;
-      eng.pauseAudio();
-      eng.onTelemetryUpdate = (data) => {
-        setDrsStatus((prev) => {
-          if (prev.isOpen === data.isDrsOpen && prev.isAvailable === data.isDrsAvailable) {
-            return prev;
-          }
-          return { isOpen: data.isDrsOpen, isAvailable: data.isDrsAvailable };
-        });
-      };
-    }
-  }, []);
-
   // Real-time Ultra-Low Latency Telemetry Broadcast Loop (50 Hz / 20ms)
   useEffect(() => {
     if (!isMultiplayer || !hasStarted) return;
@@ -390,15 +373,15 @@ export default function App() {
       setPendingRaceConfig(config);
       setIsFadingOutLoading(false);
       setIsLoadingRace(true);
-      setLoadingProgress(8);
-      setLoadingStageText('Preparando trazado oficial...');
+      setLoadingProgress(6);
+      setLoadingStageText('Preparando trazado oficial de competición...');
 
-      // Yield frame so browser renders the pure black LoadingScreen UI
+      // Yield frame so browser renders the pure black LoadingScreen UI immediately
       await new Promise((r) => setTimeout(r, 120));
 
       try {
-        setLoadingProgress(22);
-        setLoadingStageText('Inicializando pipeline gráfico Babylon.js (WebGPU / WebGL2)...');
+        setLoadingProgress(20);
+        setLoadingStageText('Inicializando motor 3D y renderizador WebGL2...');
         await new Promise((r) => setTimeout(r, 120));
 
         let eng = engineRef.current;
@@ -416,6 +399,12 @@ export default function App() {
           };
         } else if (eng && eng.activeCircuit.id !== config.circuitId) {
           eng.setCircuit(config.circuitId);
+        } else if (eng) {
+          const pPose = eng.activeCircuit.gridSlots.player;
+          eng.physics.reset(pPose.x, pPose.z, pPose.yaw);
+          eng.currentSector = 0;
+          eng.currentLapTime = 0;
+          eng.lapCount = 1;
         }
 
         setLoadingProgress(45);
@@ -469,10 +458,10 @@ export default function App() {
           await new Promise((r) => setTimeout(r, 160));
 
           setLoadingProgress(100);
-          setLoadingStageText('¡Circuito listo! Iniciando sesión...');
+          setLoadingStageText('¡Circuito listo! Entrando a pista...');
           await new Promise((r) => setTimeout(r, 350));
 
-          // 1. Scene is completely prepared! Mount 3D scene and resume audio behind the black screen
+          // 1. Scene is completely prepared and pre-rendered! Mount 3D scene and resume audio behind the black screen
           setHasStarted(true);
           eng.resumeAudio();
 
@@ -663,6 +652,14 @@ export default function App() {
     engineRef.current?.toggleAudio();
   }, []);
 
+  const handlePhaseChange = useCallback((phase: 'title' | 'dashboard') => {
+    setMenuPhase(phase);
+    if (phase === 'title' && engineRef.current) {
+      engineRef.current.dispose();
+      engineRef.current = null;
+    }
+  }, []);
+
   const handleExitToMenu = useCallback(() => {
     setIsPaused(false);
     setHasStarted(false);
@@ -677,11 +674,8 @@ export default function App() {
       setIsMultiplayer(false);
     }
     if (engineRef.current) {
-      engineRef.current.setPaused(false);
-      engineRef.current.pauseAudio();
-      const pPose = engineRef.current.activeCircuit.gridSlots.player;
-      engineRef.current.physics.reset(pPose.x, pPose.z, pPose.yaw);
-      engineRef.current.setControlsLocked(true);
+      engineRef.current.dispose();
+      engineRef.current = null;
     }
   }, [isMultiplayer]);
 
@@ -802,7 +796,7 @@ export default function App() {
       {!hasStarted && !isLoadingRace && (
         <StartScreen
           phase={menuPhase}
-          onPhaseChange={setMenuPhase}
+          onPhaseChange={handlePhaseChange}
           onStartSolo={handleStartSolo}
           onStartFreePractice={handleStartFreePractice}
           selectedCircuit={selectedCircuit}

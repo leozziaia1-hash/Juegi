@@ -628,7 +628,7 @@ export const HUD = React.memo<HUDProps>(({
         </div>
       )}
 
-      {/* Top Left Floating F1 Live Timing Tower (P1 to P5) */}
+      {/* Top Left Floating F1 Live Timing Tower (1v1 Duelo P1 / P2) */}
       {!telemetryData.isFreePractice && telemetryData.careerLeaderboard && telemetryData.careerLeaderboard.length > 0 && (
         <div className="pointer-events-auto absolute top-14 sm:top-16 left-2 sm:left-3 z-10 flex flex-col gap-1 w-[190px] sm:w-[230px] bg-neutral-950/90 border border-white/10 rounded-2xl p-2 shadow-2xl">
           {/* Header */}
@@ -639,7 +639,7 @@ export const HUD = React.memo<HUDProps>(({
             )}
           </div>
 
-          {/* Drivers Rows (P1 to P5) */}
+          {/* Drivers Rows (P1 & P2) */}
           <div className="flex flex-col gap-1">
             {telemetryData.careerLeaderboard.map((entry) => {
               const compCss = TIRE_COMPOUNDS[entry.currentCompound]?.colorCss || '#ef4444';

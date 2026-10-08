@@ -2,15 +2,10 @@
  * OrganicVegetationSystem.ts - High-Fidelity 3D Botanical Engine & GPU Instanced Foliage
  * 
  * Masterpiece Botanical Architecture:
- * - 100% Elimination of straight geometric boxes, rigid cones or flat orthogonal billboard crosses.
- * - Curved Bézier Grass Blades with natural outward gravitational bend, lateral flex and per-instance biome color tinting.
- * - Organic Sculpted Trees:
- *   1. Mediterranean Maritime Pine (Pinus Pinaster): Sinuous lofted trunk, basal root flare, tiered umbrella canopy.
- *   2. European Broadleaf Oak (Quercus Robur): Gnarled multi-bough trunk, asymmetric organic lobed domes.
- *   3. Italian Slender Cypress (Cupressus Sempervirens): Tapered spiraled organic spires.
- *   4. Silver Birch / Circuit Paddock Tree (Betula Pendula): Elegant slender trunk with weeping leafy clusters.
- *   5. Flowering Circuit Shrubbery: Interlocking spherical bush clusters.
- * - Spherical Vertex Normals: Recomputed from canopy centroid for soft, volumetric cloud-like lighting.
+ * - 100% Elimination of straight geometric boxes, rigid cones or flat cartoon spheres.
+ * - Multi-tiered foliage clusters with high organic noise displacement and deep crevice shadowing.
+ * - Baked Vertex AO: Undersides of branch clusters and canopy interiors are deeply shadowed.
+ * - Hybrid Botanical Normals: Crisp directional leaf shading with subtle outward ambient curvature.
  * - Hardware GPU Instancing with Spatial Partitioning: Native Frustum Culling and only 1-2 Draw Calls per species!
  */
 
@@ -35,7 +30,7 @@ export class OrganicVegetationSystem {
   public static computeBotanicalFoliageNormals(
     geo: THREE.BufferGeometry,
     center = new THREE.Vector3(0, 0, 0),
-    sphericalBlend = 0.28
+    sphericalBlend = 0.22
   ): void {
     geo.computeVertexNormals();
     const pos = geo.attributes.position;
@@ -65,7 +60,7 @@ export class OrganicVegetationSystem {
     center: THREE.Vector3,
     minY: number,
     maxY: number,
-    baseDarkness = 0.32
+    baseDarkness = 0.22
   ): void {
     const pos = geo.attributes.position;
     const colors = new Float32Array(pos.count * 3);
@@ -80,14 +75,14 @@ export class OrganicVegetationSystem {
       const distXZ = Math.hypot(x - center.x, z - center.z);
 
       // Deep core & under-canopy shading, bright sunlit crown & rim
-      const verticalAO = baseDarkness + Math.pow(heightT, 1.45) * (1.0 - baseDarkness);
-      const radialAO = Math.min(0.20, distXZ * 0.05);
-      const ao = Math.min(1.0, Math.max(0.15, verticalAO + radialAO));
+      const verticalAO = baseDarkness + Math.pow(heightT, 1.6) * (1.0 - baseDarkness);
+      const radialAO = Math.min(0.24, distXZ * 0.06);
+      const ao = Math.min(1.0, Math.max(0.12, verticalAO + radialAO));
 
-      // Subtle biological chlorophyll tint in shadow (rich olive umber to fresh green)
-      colors[i * 3] = Math.min(1.0, ao * 0.94);
-      colors[i * 3 + 1] = Math.min(1.0, ao * 1.04);
-      colors[i * 3 + 2] = Math.min(1.0, ao * 0.90);
+      // Subtle biological chlorophyll tint in shadow (rich deep pine olive to fresh needles)
+      colors[i * 3] = Math.min(1.0, ao * 0.90);
+      colors[i * 3 + 1] = Math.min(1.0, ao * 1.05);
+      colors[i * 3 + 2] = Math.min(1.0, ao * 0.88);
     }
 
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
@@ -100,13 +95,13 @@ export class OrganicVegetationSystem {
    * Recomputes spherical vertex normals outwards from a centroid (backward-compatible)
    */
   public static computeSphericalNormals(geo: THREE.BufferGeometry, center = new THREE.Vector3(0, 0, 0)): void {
-    this.computeBotanicalFoliageNormals(geo, center, 0.35);
+    this.computeBotanicalFoliageNormals(geo, center, 0.25);
   }
 
   /**
    * Applies multi-frequency organic fractal noise to foliage vertices to break geometric uniformity
    */
-  public static displaceFoliage(geo: THREE.BufferGeometry, scale = 0.28): void {
+  public static displaceFoliage(geo: THREE.BufferGeometry, scale = 0.35): void {
     const pos = geo.attributes.position;
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
@@ -114,12 +109,13 @@ export class OrganicVegetationSystem {
       const z = pos.getZ(i);
       const dist = Math.hypot(x, z) || 0.001;
 
-      const j1 = Math.sin(x * 4.6 + y * 3.2) * Math.cos(z * 4.2);
-      const j2 = Math.sin(y * 7.2 + (x + z) * 2.7) * 0.45;
-      const displace = (j1 + j2) * scale;
+      const j1 = Math.sin(x * 5.2 + y * 4.1) * Math.cos(z * 4.8);
+      const j2 = Math.sin(y * 8.6 + (x + z) * 3.4) * 0.55;
+      const j3 = Math.cos(x * 12.0 - z * 10.0) * 0.25;
+      const displace = (j1 + j2 + j3) * scale;
 
       pos.setX(i, x + (x / dist) * displace);
-      pos.setY(i, y + displace * 0.65);
+      pos.setY(i, y + displace * 0.75);
       pos.setZ(i, z + (z / dist) * displace);
     }
     pos.needsUpdate = true;
@@ -128,8 +124,6 @@ export class OrganicVegetationSystem {
 
   /**
    * Generates an authentic FIA Grade-1 competition grass blade cluster (16cm - 24cm tall).
-   * Features 8 slender curved Bézier blades with natural gravitational arching,
-   * realistic width tapering, and built-in vertex color Ambient Occlusion & sunlit tips.
    */
   public static createCurvedGrassTuftGeometry(): THREE.BufferGeometry {
     const bladeCount = 8;
@@ -142,7 +136,6 @@ export class OrganicVegetationSystem {
       const bendAmount = 0.06 + Math.random() * 0.04;
       const lateralLean = (Math.random() - 0.5) * 0.025;
 
-      // 4-segment curved ribbon blade
       const segments = 4;
       const vertices: number[] = [];
       const colors: number[] = [];
@@ -151,22 +144,19 @@ export class OrganicVegetationSystem {
 
       for (let s = 0; s <= segments; s++) {
         const t = s / segments;
-        const w = bladeWidth * (1.0 - t * 0.85); // Realistic taper towards razor tip
+        const w = bladeWidth * (1.0 - t * 0.85);
         const outward = Math.pow(t, 1.8) * bendAmount;
         const lateral = Math.pow(t, 1.4) * lateralLean;
         const y = t * bladeHeight - Math.pow(t, 2.2) * 0.02;
 
-      // Rich dark botanical vertex color gradient (Ground Contact AO -> Deep Chlorophyll -> Dense Leaf Tip)
-      const cr = 0.012 + t * 0.035 + (Math.random() - 0.5) * 0.006;
-      const cg = 0.028 + t * 0.075 + (Math.random() - 0.5) * 0.008;
-      const cb = 0.014 + t * 0.030;
+        const cr = 0.012 + t * 0.035;
+        const cg = 0.028 + t * 0.075;
+        const cb = 0.014 + t * 0.030;
 
-        // Left vertex
         vertices.push(-w / 2 + lateral, y, outward);
         colors.push(cr, cg, cb);
         uvs.push(0, t);
 
-        // Right vertex
         vertices.push(w / 2 + lateral, y, outward);
         colors.push(cr, cg, cb);
         uvs.push(1, t);
@@ -193,15 +183,14 @@ export class OrganicVegetationSystem {
     const merged = safeMergeBufferGeometries(bladeGeos, false) || bladeGeos[0];
     for (let i = 0; i < bladeGeos.length; i++) bladeGeos[i].dispose();
 
-    // Embed root slightly in the ground (0.015m) for perfect anchor without floating gaps
     merged.translate(0, -0.015, 0);
     return merged;
   }
 
   /**
-   * Mediterranean Maritime Pine (Pinus Pinaster)
-   * Muscular lofted trunk with root flutes + structural radiating boughs supporting
-   * distinct horizontal umbrella foliage plateaus with vertex AO and botanical shading.
+   * European High-Alpine Conifer / Maritime Pine (Pinus Pinaster / Picea Abies)
+   * Muscular lofted trunk supporting horizontal tiered needle canopies
+   * with sculpted branch clusters, rich vertex ambient occlusion and zero spherical look.
    */
   public static createPineGeometries(): { trunk: THREE.BufferGeometry; foliage: THREE.BufferGeometry } {
     const trunkH = 8.5;
@@ -214,16 +203,13 @@ export class OrganicVegetationSystem {
     for (let s = 0; s <= trunkSegments; s++) {
       const t = s / trunkSegments;
       const y = t * trunkH;
-      // Organic sinuous curvature along X and Z
       const cx = Math.sin(t * Math.PI * 0.88) * 0.38;
       const cz = Math.cos(t * Math.PI * 0.58) * 0.24;
-      // Exponential base flare with root buttresses at ground level
       const rootFlare = Math.pow(Math.max(0, 1 - t * 3.5), 2.2) * 0.65;
       const r = 0.22 + Math.pow(1 - t, 2.7) * 0.42 + rootFlare;
 
       for (let j = 0; j <= radialSegs; j++) {
         const ang = (j / radialSegs) * Math.PI * 2;
-        // 5 buttressed root ridges at ground connection
         const rootFlute = s <= 1 ? Math.cos(ang * 5) * 0.22 * (1 - t * 0.8) : 0;
         const effR = r + rootFlute;
         const vx = cx + Math.cos(ang) * effR;
@@ -250,7 +236,6 @@ export class OrganicVegetationSystem {
     trunkGeo.setIndex(trunkIndices);
     trunkGeo.computeVertexNormals();
 
-    // Secondary structural boughs radiating into canopy plateaus
     const trunkParts: THREE.BufferGeometry[] = [trunkGeo];
     const boughAngles = [0.45, 1.65, 2.85, 4.15, 5.35];
     boughAngles.forEach((ang, idx) => {
@@ -266,31 +251,30 @@ export class OrganicVegetationSystem {
     const mergedTrunk = safeMergeBufferGeometries(trunkParts, false) || trunkParts[0];
     for (let i = 0; i < trunkParts.length; i++) trunkParts[i].dispose();
 
-    // Layered umbrella canopy plateaus with needle lobe scalloping
+    // Natural layered umbrella canopy plateaus with asymmetric lobed branch masses
     const foliageGeos: THREE.BufferGeometry[] = [];
     const tiers = [
-      { y: trunkH * 0.72, r: 4.4, lobes: 5, scaleY: 0.38 },
-      { y: trunkH * 0.88, r: 3.7, lobes: 4, scaleY: 0.40 },
-      { y: trunkH * 1.04, r: 2.7, lobes: 3, scaleY: 0.44 },
+      { y: trunkH * 0.70, r: 4.6, lobes: 6, scaleY: 0.28 },
+      { y: trunkH * 0.86, r: 3.9, lobes: 5, scaleY: 0.32 },
+      { y: trunkH * 1.02, r: 2.9, lobes: 4, scaleY: 0.35 },
+      { y: trunkH * 1.15, r: 1.8, lobes: 3, scaleY: 0.40 },
     ];
 
     tiers.forEach((tier) => {
-      // Flattened umbrella dome pad with concave under-surface
-      const mainPad = new THREE.SphereGeometry(tier.r, 12, 6, 0, Math.PI * 2, 0, Math.PI * 0.58);
-      mainPad.scale(1.0, tier.scaleY, 1.0);
-      this.displaceFoliage(mainPad, 0.28);
+      // Flattened horizontal coniferous plateau pad
+      const mainPad = new THREE.CylinderGeometry(tier.r * 0.2, tier.r, tier.r * tier.scaleY, 10, 2);
+      this.displaceFoliage(mainPad, 0.36);
       mainPad.translate(0, tier.y, 0);
       foliageGeos.push(mainPad);
 
       // Surrounding organic needle clusters
       for (let l = 0; l < tier.lobes; l++) {
-        const ang = (l / tier.lobes) * Math.PI * 2 + 0.25;
-        const dist = tier.r * 0.65;
-        const lobeR = tier.r * 0.48;
-        const lobe = new THREE.SphereGeometry(lobeR, 8, 5, 0, Math.PI * 2, 0, Math.PI * 0.62);
-        lobe.scale(1.15, tier.scaleY * 1.05, 0.95);
-        this.displaceFoliage(lobe, 0.24);
-        lobe.translate(Math.cos(ang) * dist, tier.y - 0.12, Math.sin(ang) * dist);
+        const ang = (l / tier.lobes) * Math.PI * 2 + 0.3;
+        const dist = tier.r * 0.72;
+        const lobeR = tier.r * 0.42;
+        const lobe = new THREE.CylinderGeometry(0.1, lobeR, lobeR * tier.scaleY * 1.2, 7, 2);
+        this.displaceFoliage(lobe, 0.32);
+        lobe.translate(Math.cos(ang) * dist, tier.y - 0.14, Math.sin(ang) * dist);
         foliageGeos.push(lobe);
       }
     });
@@ -298,17 +282,14 @@ export class OrganicVegetationSystem {
     const mergedFoliage = safeMergeBufferGeometries(foliageGeos, false) || foliageGeos[0];
     for (let i = 0; i < foliageGeos.length; i++) foliageGeos[i].dispose();
 
-    // Bake Ambient Occlusion vertex colors into canopy
-    this.applyFoliageVertexAO(mergedFoliage, new THREE.Vector3(0, trunkH * 0.88, 0), trunkH * 0.60, trunkH * 1.25, 0.28);
-    this.computeBotanicalFoliageNormals(mergedFoliage, new THREE.Vector3(0, trunkH * 0.88, 0), 0.26);
+    this.applyFoliageVertexAO(mergedFoliage, new THREE.Vector3(0, trunkH * 0.90, 0), trunkH * 0.58, trunkH * 1.28, 0.20);
+    this.computeBotanicalFoliageNormals(mergedFoliage, new THREE.Vector3(0, trunkH * 0.90, 0), 0.22);
 
     return { trunk: mergedTrunk, foliage: mergedFoliage };
   }
 
   /**
    * European Broadleaf Oak (Quercus Robur)
-   * Tapered flared trunk with 5 massive radiating boughs supporting asymmetric
-   * organic deciduous foliage clusters with baked vertex AO.
    */
   public static createOakGeometries(): { trunk: THREE.BufferGeometry; foliage: THREE.BufferGeometry } {
     const trunkH = 6.0;
@@ -316,7 +297,6 @@ export class OrganicVegetationSystem {
     trunkGeo.translate(0, trunkH / 2 - 0.15, 0);
 
     const trunkParts: THREE.BufferGeometry[] = [trunkGeo];
-    // 5 Curved radiating organic boughs
     for (let b = 0; b < 5; b++) {
       const ang = (b / 5) * Math.PI * 2 + 0.35;
       const boughCurve = new THREE.CatmullRomCurve3([
@@ -330,7 +310,6 @@ export class OrganicVegetationSystem {
     const mergedTrunk = safeMergeBufferGeometries(trunkParts, false) || trunkParts[0];
     for (let i = 0; i < trunkParts.length; i++) trunkParts[i].dispose();
 
-    // Asymmetrical organic foliage masses
     const clusterLocs = [
       { x: 0, y: trunkH * 1.05, z: 0, r: 3.2 },
       { x: 1.85, y: trunkH * 1.20, z: 0.95, r: 2.6 },
@@ -343,9 +322,9 @@ export class OrganicVegetationSystem {
 
     const foliageParts: THREE.BufferGeometry[] = [];
     clusterLocs.forEach((cl) => {
-      const geo = new THREE.SphereGeometry(cl.r, 8, 6);
-      geo.scale(1.2, 0.78, 1.15);
-      this.displaceFoliage(geo, 0.36);
+      const geo = new THREE.IcosahedronGeometry(cl.r, 2);
+      geo.scale(1.2, 0.75, 1.15);
+      this.displaceFoliage(geo, 0.42);
       geo.translate(cl.x, cl.y, cl.z);
       foliageParts.push(geo);
     });
@@ -353,15 +332,14 @@ export class OrganicVegetationSystem {
     const mergedFoliage = safeMergeBufferGeometries(foliageParts, false) || foliageParts[0];
     for (let i = 0; i < foliageParts.length; i++) foliageParts[i].dispose();
 
-    this.applyFoliageVertexAO(mergedFoliage, new THREE.Vector3(0, trunkH * 1.25, 0), trunkH * 0.85, trunkH * 1.85, 0.30);
-    this.computeBotanicalFoliageNormals(mergedFoliage, new THREE.Vector3(0, trunkH * 1.25, 0), 0.28);
+    this.applyFoliageVertexAO(mergedFoliage, new THREE.Vector3(0, trunkH * 1.25, 0), trunkH * 0.85, trunkH * 1.85, 0.22);
+    this.computeBotanicalFoliageNormals(mergedFoliage, new THREE.Vector3(0, trunkH * 1.25, 0), 0.20);
 
     return { trunk: mergedTrunk, foliage: mergedFoliage };
   }
 
   /**
    * Italian Slender Cypress (Cupressus Sempervirens)
-   * Slender fluted columnar flame with vertical spiral ridges, organic taper, and vertex AO.
    */
   public static createCypressGeometries(): { trunk: THREE.BufferGeometry; foliage: THREE.BufferGeometry } {
     const trunkH = 1.8;
@@ -375,10 +353,9 @@ export class OrganicVegetationSystem {
     for (let t = 0; t < tiers; t++) {
       const ty = trunkH * 0.70 + t * (foliageH / tiers) * 0.88;
       const progress = t / (tiers - 1);
-      // Continuous bell-shaped cypress contour with organic taper
       const tr = 1.45 * Math.sin(progress * Math.PI * 0.84 + 0.16) + 0.32;
-      const geo = new THREE.CylinderGeometry(tr * 0.62, tr, (foliageH / tiers) * 1.35, 8, 2);
-      this.displaceFoliage(geo, 0.20);
+      const geo = new THREE.CylinderGeometry(tr * 0.55, tr, (foliageH / tiers) * 1.35, 8, 2);
+      this.displaceFoliage(geo, 0.26);
       geo.translate(0, ty, 0);
       foliageParts.push(geo);
     }
@@ -386,8 +363,8 @@ export class OrganicVegetationSystem {
     const mergedFoliage = safeMergeBufferGeometries(foliageParts, false) || foliageParts[0];
     for (let i = 0; i < foliageParts.length; i++) foliageParts[i].dispose();
 
-    this.applyFoliageVertexAO(mergedFoliage, new THREE.Vector3(0, trunkH + foliageH * 0.5, 0), trunkH * 0.7, trunkH + foliageH, 0.32);
-    this.computeBotanicalFoliageNormals(mergedFoliage, new THREE.Vector3(0, trunkH + foliageH * 0.5, 0), 0.30);
+    this.applyFoliageVertexAO(mergedFoliage, new THREE.Vector3(0, trunkH + foliageH * 0.5, 0), trunkH * 0.7, trunkH + foliageH, 0.25);
+    this.computeBotanicalFoliageNormals(mergedFoliage, new THREE.Vector3(0, trunkH + foliageH * 0.5, 0), 0.22);
 
     return { trunk: trunkGeo, foliage: mergedFoliage };
   }
@@ -409,9 +386,9 @@ export class OrganicVegetationSystem {
     ];
 
     clusters.forEach((cl) => {
-      const geo = new THREE.SphereGeometry(cl.r, 8, 6);
+      const geo = new THREE.IcosahedronGeometry(cl.r, 2);
       geo.scale(1.2, 0.85, 1.2);
-      this.displaceFoliage(geo, 0.32);
+      this.displaceFoliage(geo, 0.36);
       geo.translate(cl.ox, cl.y, cl.oz);
       foliageParts.push(geo);
     });
@@ -419,8 +396,8 @@ export class OrganicVegetationSystem {
     const mergedFoliage = safeMergeBufferGeometries(foliageParts, false) || foliageParts[0];
     for (let i = 0; i < foliageParts.length; i++) foliageParts[i].dispose();
 
-    this.applyFoliageVertexAO(mergedFoliage, new THREE.Vector3(0, trunkH * 0.85, 0), trunkH * 0.55, trunkH * 1.25, 0.32);
-    this.computeBotanicalFoliageNormals(mergedFoliage, new THREE.Vector3(0, trunkH * 0.85, 0), 0.28);
+    this.applyFoliageVertexAO(mergedFoliage, new THREE.Vector3(0, trunkH * 0.85, 0), trunkH * 0.55, trunkH * 1.25, 0.25);
+    this.computeBotanicalFoliageNormals(mergedFoliage, new THREE.Vector3(0, trunkH * 0.85, 0), 0.22);
     return { trunk: trunkGeo, foliage: mergedFoliage };
   }
 
@@ -437,23 +414,22 @@ export class OrganicVegetationSystem {
     ];
 
     clusterPositions.forEach((cl) => {
-      const geo = new THREE.SphereGeometry(cl.r, 8, 6);
+      const geo = new THREE.IcosahedronGeometry(cl.r, 2);
       geo.scale(1.2, 0.75, 1.2);
-      this.displaceFoliage(geo, 0.28);
+      this.displaceFoliage(geo, 0.32);
       geo.translate(cl.x, cl.y, cl.z);
       parts.push(geo);
     });
 
     const merged = safeMergeBufferGeometries(parts, false) || parts[0];
     for (let i = 0; i < parts.length; i++) parts[i].dispose();
-    this.applyFoliageVertexAO(merged, new THREE.Vector3(0, 0.5, 0), 0.0, 1.2, 0.35);
-    this.computeBotanicalFoliageNormals(merged, new THREE.Vector3(0, 0.5, 0), 0.28);
+    this.applyFoliageVertexAO(merged, new THREE.Vector3(0, 0.5, 0), 0.0, 1.2, 0.28);
+    this.computeBotanicalFoliageNormals(merged, new THREE.Vector3(0, 0.5, 0), 0.22);
     return merged;
   }
 
   /**
-   * Batches tree instances across the circuit into GPU InstancedMeshes with spatial culling
-   * and per-instance botanical genetic color variation.
+   * Compiles and instantiates the full botanical forest into GPU InstancedMeshes
    */
   public static buildVegetationForest(
     parent: THREE.Group,
@@ -466,53 +442,68 @@ export class OrganicVegetationSystem {
       bushMat: THREE.Material;
       birchFoliageMat?: THREE.Material;
     },
-    obstaclesOut?: StaticObstacle[]
+    staticObstacles?: StaticObstacle[]
   ): void {
-    if (trees.length === 0) return;
-
-    // Pre-create master prototype geometries once in GPU memory
+    if (staticObstacles) {
+      trees.forEach((t) => {
+        if (t.type !== 'bush') {
+          staticObstacles.push({
+            x: t.x,
+            z: t.z,
+            radius: 0.8 * (t.scale || 1.0),
+            type: 'tree',
+          });
+        }
+      });
+    }
     const pine = this.createPineGeometries();
     const oak = this.createOakGeometries();
     const cypress = this.createCypressGeometries();
     const birch = this.createBirchGeometries();
     const bushGeo = this.createBushGeometry();
 
-    const pines = trees.filter((t) => t.type === 'pine');
-    const oaks = trees.filter((t) => t.type === 'oak');
-    const cypresses = trees.filter((t) => t.type === 'cypress');
-    const birches = trees.filter((t) => t.type === 'birch');
-    const bushes = trees.filter((t) => t.type === 'bush');
+    const pines: TreePlacementConfig[] = [];
+    const oaks: TreePlacementConfig[] = [];
+    const cypresses: TreePlacementConfig[] = [];
+    const birches: TreePlacementConfig[] = [];
+    const bushes: TreePlacementConfig[] = [];
+
+    trees.forEach((t) => {
+      switch (t.type) {
+        case 'pine':
+          pines.push(t);
+          break;
+        case 'oak':
+          oaks.push(t);
+          break;
+        case 'cypress':
+          cypresses.push(t);
+          break;
+        case 'birch':
+          birches.push(t);
+          break;
+        case 'bush':
+          bushes.push(t);
+          break;
+      }
+    });
 
     const instantiateType = (
       items: TreePlacementConfig[],
       trunkGeo: THREE.BufferGeometry | null,
       foliageGeo: THREE.BufferGeometry,
       foliageMat: THREE.Material,
-      baseRadius: number,
-      baseHue: number
-    ) => {
+      scaleMultiplier = 1.0,
+      baseHue = 0.35
+    ): void => {
       if (items.length === 0) return;
 
-      // Register physics obstacles
-      if (obstaclesOut) {
-        items.forEach((item) => {
-          const s = item.scale || 1.0;
-          obstaclesOut.push({
-            x: item.x,
-            z: item.z,
-            radius: baseRadius * s,
-            type: 'tree',
-          });
-        });
-      }
-
-      // Spatial partitioning into ~120m localized sectors for native hardware Frustum Culling
-      const CHUNK_SIZE = 120;
+      const chunkSize = 120;
       const chunks = new Map<string, TreePlacementConfig[]>();
 
       items.forEach((item) => {
-        const cx = Math.floor((item.x + 1000) / CHUNK_SIZE);
-        const cz = Math.floor((item.z + 1000) / CHUNK_SIZE);
+        const cx = Math.floor(item.x / chunkSize);
+        const cz = Math.floor(item.z / chunkSize);
         const key = `${cx}_${cz}`;
         let list = chunks.get(key);
         if (!list) {
@@ -535,16 +526,15 @@ export class OrganicVegetationSystem {
           trunkMesh.castShadow = false;
 
           chunkItems.forEach((item, i) => {
-            const s = item.scale || 1.0;
+            const s = (item.scale || 1.0) * scaleMultiplier;
             dummy.position.set(item.x, 0, item.z);
             dummy.rotation.set(0, item.yaw || Math.random() * Math.PI * 2, 0);
             dummy.scale.set(s, s, s);
             dummy.updateMatrix();
             trunkMesh.setMatrixAt(i, dummy.matrix);
 
-            // Subtle organic bark variation
-            const barkLum = 0.34 + Math.sin(item.x * 0.19 + item.z * 0.29) * 0.05;
-            col.setHSL(0.08, 0.32, barkLum);
+            const barkLum = 0.32 + Math.sin(item.x * 0.19 + item.z * 0.29) * 0.05;
+            col.setHSL(0.08, 0.30, barkLum);
             trunkMesh.setColorAt(i, col);
           });
 
@@ -560,18 +550,17 @@ export class OrganicVegetationSystem {
         foliageMesh.castShadow = false;
 
         chunkItems.forEach((item, i) => {
-          const s = item.scale || 1.0;
+          const s = (item.scale || 1.0) * scaleMultiplier;
           dummy.position.set(item.x, 0, item.z);
           dummy.rotation.set(0, item.yaw || Math.random() * Math.PI * 2, 0);
           dummy.scale.set(s, s, s);
           dummy.updateMatrix();
           foliageMesh.setMatrixAt(i, dummy.matrix);
 
-          // Per-instance botanical genetic color variation
-          const hueShift = Math.sin(item.x * 0.17 + item.z * 0.23) * 0.024;
-          const satShift = Math.cos(item.x * 0.31 + item.z * 0.19) * 0.08;
-          const lumShift = Math.sin(item.x * 0.43 + item.z * 0.37) * 0.06;
-          col.setHSL(baseHue + hueShift, 0.52 + satShift, 0.48 + lumShift);
+          const hueShift = Math.sin(item.x * 0.17 + item.z * 0.23) * 0.022;
+          const satShift = Math.cos(item.x * 0.31 + item.z * 0.19) * 0.07;
+          const lumShift = Math.sin(item.x * 0.43 + item.z * 0.37) * 0.05;
+          col.setHSL(baseHue + hueShift, 0.50 + satShift, 0.45 + lumShift);
           foliageMesh.setColorAt(i, col);
         });
 
@@ -583,10 +572,10 @@ export class OrganicVegetationSystem {
       });
     };
 
-    instantiateType(pines, pine.trunk, pine.foliage, materials.pineFoliageMat, 1.2, 0.38);
-    instantiateType(oaks, oak.trunk, oak.foliage, materials.oakFoliageMat, 1.4, 0.33);
-    instantiateType(cypresses, cypress.trunk, cypress.foliage, materials.cypressFoliageMat, 0.85, 0.39);
+    instantiateType(pines, pine.trunk, pine.foliage, materials.pineFoliageMat, 1.2, 0.36);
+    instantiateType(oaks, oak.trunk, oak.foliage, materials.oakFoliageMat, 1.35, 0.32);
+    instantiateType(cypresses, cypress.trunk, cypress.foliage, materials.cypressFoliageMat, 0.85, 0.38);
     instantiateType(birches, birch.trunk, birch.foliage, materials.birchFoliageMat || materials.oakFoliageMat, 1.0, 0.31);
-    instantiateType(bushes, null, bushGeo, materials.bushMat, 0.6, 0.34);
+    instantiateType(bushes, null, bushGeo, materials.bushMat, 0.6, 0.33);
   }
 }

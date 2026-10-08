@@ -28,6 +28,7 @@ import { GrandstandCrowdSystem, CrowdPlacementConfig } from '../../crowd/Grandst
 import { CurvedPitBuildingBuilder } from '../../world/CurvedPitBuildingBuilder';
 import { OrganicVegetationSystem, TreePlacementConfig } from '../../world/OrganicVegetationSystem';
 import { OrganicTerrainBuilder } from '../../world/OrganicTerrainBuilder';
+import { DistantMountainBackdropBuilder } from '../../world/DistantMountainBackdropBuilder';
 
 export class SpeedwayTrackBuilder implements ITrackWorld {
   public group: THREE.Group;
@@ -464,6 +465,17 @@ export class SpeedwayTrackBuilder implements ITrackWorld {
       { x: 0, z: 50 }
     );
     this.group.add(terrainMesh);
+
+    // 360° Panoramic Distant Mountain Range Backdrop
+    const mountainBackdrop = DistantMountainBackdropBuilder.buildMountainRing({
+      innerRadius: 520,
+      outerRadius: 920,
+      radialSegments: 288,
+      heightSegments: 24,
+      baseHeightScale: 1.25,
+      center: { x: 0, z: 50 },
+    });
+    this.group.add(mountainBackdrop);
   }
 
   private buildTrackRibbon(): void {
@@ -709,10 +721,10 @@ export class SpeedwayTrackBuilder implements ITrackWorld {
       dashGeometries.push(dGeo);
     }
 
-    // Checkered Start / Finish Line
-    const sfGeo = new THREE.PlaneGeometry(16.0, 1.8);
+    // Checkered Start / Finish Line (Transverse across the entire 16m track width)
+    const sfGeo = new THREE.PlaneGeometry(2.0, 16.0);
     sfGeo.rotateX(-Math.PI / 2);
-    sfGeo.translate(0, 0.032, -130);
+    sfGeo.translate(-10.0, 0.032, -130);
     dashGeometries.push(sfGeo);
 
     // Starting Grid Boxes (Slots 1 to 5)
@@ -2466,7 +2478,8 @@ export class SpeedwayTrackBuilder implements ITrackWorld {
         continue;
       }
 
-      if (tx > -90 && tx < 165 && tz > -135 && tz < -75) {
+      // Strictly eliminate all trees along start/finish straight and adjacent to pit buildings / garages
+      if (tz < -65 && Math.abs(tx) <= 220) {
         continue;
       }
 
